@@ -1,0 +1,32 @@
+<Project Sdk="Microsoft.NET.Sdk.Worker">
+  <PropertyGroup>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <RootNamespace>Medisync.RisLocalGateway.Service</RootNamespace>
+    <AssemblyName>Medisync.RisLocalGateway.Service</AssemblyName>
+    <OutputType>Exe</OutputType>
+    <UserSecretsId>medisync-ris-local-gateway-service</UserSecretsId>
+  </PropertyGroup>
+  <ItemGroup>
+    <None Update="appsettings.json">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+  </ItemGroup>
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Extensions.Hosting" Version="8.0.1" />
+    <PackageReference Include="Microsoft.Extensions.Hosting.WindowsServices" Version="8.0.1" />
+    <PackageReference Include="Serilog.Extensions.Hosting" Version="8.0.0" />
+    <PackageReference Include="Serilog.Settings.Configuration" Version="8.0.4" />
+    <PackageReference Include="Serilog.Sinks.Console" Version="6.0.0" />
+    <PackageReference Include="Serilog.Sinks.File" Version="6.0.0" />
+    <!-- Native DICOM codecs (JPEG 2000 / JPEG-LS / JPEG / RLE) for transcoding before STOW.
+         fo-dicom 5.x core has NO native codecs; this package provides them + the type
+         FellowOakDicom.Imaging.NativeCodec.NativeTranscoderManager (registered in Program.cs).
+         If NuGet flags a version conflict with fo-dicom 5.2.0, pick the matching
+         fo-dicom.Codecs version via the IDE NuGet manager. -->
+    <PackageReference Include="fo-dicom.Codecs" Version="5.16.5.1" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\Medisync.RisLocalGateway.Core\Medisync.RisLocalGateway.Core.csproj" />
+    <ProjectReference Include="..\Medisync.RisLocalGateway.Dicom\Medisync.RisLocalGateway.Dicom.csproj" />
+  </ItemGroup>
+</Project>

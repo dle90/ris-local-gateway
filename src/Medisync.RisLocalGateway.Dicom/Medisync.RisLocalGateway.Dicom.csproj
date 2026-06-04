@@ -1,0 +1,14 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <RootNamespace>Medisync.RisLocalGateway.Dicom</RootNamespace>
+    <AssemblyName>Medisync.RisLocalGateway.Dicom</AssemblyName>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="fo-dicom" Version="5.2.0" />
+    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="8.0.2" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\Medisync.RisLocalGateway.Core\Medisync.RisLocalGateway.Core.csproj" />
+  </ItemGroup>
+</Project>

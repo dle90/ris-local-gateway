@@ -1,0 +1,106 @@
+<Window x:Class="Medisync.RisLocalGateway.ConfigApp.Views.EndpointsWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Cấu hình endpoint RIS"
+        Width="640" Height="600"
+        WindowStartupLocation="CenterOwner"
+        ResizeMode="CanMinimize"
+        FontFamily="Segoe UI" FontSize="13"
+        ShowInTaskbar="False">
+
+    <DockPanel>
+        <!-- Header -->
+        <Border DockPanel.Dock="Top" Background="#1F2937" Padding="16,12">
+            <StackPanel>
+                <TextBlock Text="Cấu hình endpoint RIS"
+                           Foreground="White" FontSize="16" FontWeight="SemiBold" />
+                <TextBlock Text="Sub-URL của từng API. Khi RIS đổi version (v2, v3…) chỉ cần sửa ở đây."
+                           Foreground="#9CA3AF" FontSize="11" Margin="0,2,0,0" />
+            </StackPanel>
+        </Border>
+
+        <!-- Footer -->
+        <Border DockPanel.Dock="Bottom" Background="#F3F4F6"
+                BorderBrush="#E5E7EB" BorderThickness="0,1,0,0" Padding="20,12">
+            <DockPanel>
+                <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
+                    <Button Content="Reset mặc định" Command="{Binding ResetToDefaultCommand}"
+                            MinWidth="120" Height="32" Margin="0,0,8,0" Padding="12,4" />
+                    <Button Content="Hủy" Command="{Binding CancelCommand}"
+                            MinWidth="80" Height="32" Margin="0,0,8,0" Padding="12,4" />
+                    <Button Content="Lưu endpoint" Command="{Binding SaveCommand}"
+                            Background="#1976D2" Foreground="White" FontWeight="SemiBold"
+                            MinWidth="140" Height="32" Padding="12,4" BorderThickness="0" />
+                </StackPanel>
+
+                <TextBlock Text="{Binding Status}"
+                           Foreground="{Binding StatusColor}"
+                           VerticalAlignment="Center" TextWrapping="Wrap"
+                           Margin="0,0,16,0" />
+            </DockPanel>
+        </Border>
+
+        <!-- Form -->
+        <ScrollViewer VerticalScrollBarVisibility="Auto">
+            <StackPanel Margin="20,16">
+
+                <TextBlock Text="Đăng nhập (Sign In)" FontWeight="SemiBold" Margin="0,0,0,2" />
+                <TextBlock Text="POST — gateway gửi tài khoản+mật khẩu để lấy session token. Đây là endpoint đầu tiên gateway gọi mỗi khi cần auth."
+                           Foreground="#6B7280" FontSize="11" Margin="0,0,0,4" TextWrapping="Wrap" />
+                <TextBox Text="{Binding SignIn, UpdateSourceTrigger=PropertyChanged}"
+                         FontFamily="Consolas, Courier New" />
+
+                <TextBlock Text="Health Check" FontWeight="SemiBold" Margin="0,16,0,2" />
+                <TextBlock Text="GET — ping endpoint để kiểm tra RIS có sống không"
+                           Foreground="#6B7280" FontSize="11" Margin="0,0,0,4" />
+                <TextBox Text="{Binding HealthCheck, UpdateSourceTrigger=PropertyChanged}"
+                         FontFamily="Consolas, Courier New" />
+
+                <TextBlock Text="Worklist (MWL)" FontWeight="SemiBold" Margin="0,16,0,2" />
+                <TextBlock Text="POST — lấy danh sách ca chụp scheduled, gateway gọi khi modality query C-FIND MWL"
+                           Foreground="#6B7280" FontSize="11" Margin="0,0,0,4" />
+                <TextBox Text="{Binding WorkList, UpdateSourceTrigger=PropertyChanged}"
+                         FontFamily="Consolas, Courier New" />
+
+                <TextBlock Text="MPPS — In Progress" FontWeight="SemiBold" Margin="0,16,0,2" />
+                <TextBlock Text="POST — báo bắt đầu 1 bước chụp (1 SPS). 1 ca có thể có nhiều bước (CT cản quang 4 phase = 4 MPPS)."
+                           Foreground="#6B7280" FontSize="11" Margin="0,0,0,4" TextWrapping="Wrap" />
+                <TextBox Text="{Binding MppsInProgress, UpdateSourceTrigger=PropertyChanged}"
+                         FontFamily="Consolas, Courier New" />
+
+                <TextBlock Text="MPPS — Completed" FontWeight="SemiBold" Margin="0,16,0,2" />
+                <TextBlock Text="POST — báo 1 bước chụp đã xong (N-SET status=COMPLETED). Cập nhật status từng step, không phải cả ca."
+                           Foreground="#6B7280" FontSize="11" Margin="0,0,0,4" TextWrapping="Wrap" />
+                <TextBox Text="{Binding MppsCompleted, UpdateSourceTrigger=PropertyChanged}"
+                         FontFamily="Consolas, Courier New" />
+
+                <TextBlock Text="MPPS — Discontinued" FontWeight="SemiBold" Margin="0,16,0,2" />
+                <TextBlock Text="POST — báo 1 bước chụp bị huỷ (N-SET status=DISCONTINUED). KTV bấm cancel giữa phase."
+                           Foreground="#6B7280" FontSize="11" Margin="0,0,0,4" TextWrapping="Wrap" />
+                <TextBox Text="{Binding MppsDiscontinued, UpdateSourceTrigger=PropertyChanged}"
+                         FontFamily="Consolas, Courier New" />
+
+                <TextBlock Text="Instance Metadata" FontWeight="SemiBold" Margin="0,16,0,2" />
+                <TextBlock Text="POST — upload metadata DICOM instance sau C-STORE"
+                           Foreground="#6B7280" FontSize="11" Margin="0,0,0,4" />
+                <TextBox Text="{Binding InstanceMetadata, UpdateSourceTrigger=PropertyChanged}"
+                         FontFamily="Consolas, Courier New" />
+
+                <Border Background="#FEF3C7" BorderBrush="#FCD34D" BorderThickness="1"
+                        CornerRadius="4" Padding="12,8" Margin="0,20,0,0">
+                    <StackPanel>
+                        <TextBlock FontWeight="SemiBold" Text="💡 Ghi chú" Margin="0,0,0,4" />
+                        <TextBlock TextWrapping="Wrap" FontSize="11">
+                            <Run Text="• Path bắt đầu bằng " /><Run FontFamily="Consolas" Text="/" /><Run Text=" (vd " /><Run FontFamily="Consolas" Text="/v1/lgs/work-list" /><Run Text=")." />
+                            <LineBreak />
+                            <Run Text="• Full URL = Base URL + path. Vd Base " /><Run FontFamily="Consolas" Text="http://ris.local" /><Run Text=" + path " /><Run FontFamily="Consolas" Text="/v1/lgs/work-list" /><Run Text=" → " /><Run FontFamily="Consolas" Text="http://ris.local/v1/lgs/work-list" /><Run Text="." />
+                            <LineBreak />
+                            <Run Text="• Khi RIS update sang v2 chỉ cần đổi " /><Run FontFamily="Consolas" Text="/v1/..." /><Run Text=" thành " /><Run FontFamily="Consolas" Text="/v2/..." /><Run Text=" — không cần rebuild gateway." />
+                        </TextBlock>
+                    </StackPanel>
+                </Border>
+
+            </StackPanel>
+        </ScrollViewer>
+    </DockPanel>
+</Window>

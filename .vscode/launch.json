@@ -1,0 +1,40 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Service (console debug)",
+      "type": "coreclr",
+      "request": "launch",
+      "preLaunchTask": "build-service",
+      "program": "${workspaceFolder}/src/Medisync.RisLocalGateway.Service/bin/Debug/net8.0-windows/Medisync.RisLocalGateway.Service.exe",
+      "args": [],
+      "cwd": "${workspaceFolder}/src/Medisync.RisLocalGateway.Service",
+      "stopAtEntry": false,
+      "console": "integratedTerminal",
+      "internalConsoleOptions": "openOnSessionStart"
+    },
+    {
+      "name": "ConfigApp (WPF debug)",
+      "type": "coreclr",
+      "request": "launch",
+      "preLaunchTask": "build-configapp",
+      "program": "${workspaceFolder}/src/Medisync.RisLocalGateway.ConfigApp/bin/Debug/net8.0-windows/Medisync.RisLocalGateway.ConfigApp.exe",
+      "args": [],
+      "cwd": "${workspaceFolder}/src/Medisync.RisLocalGateway.ConfigApp",
+      "stopAtEntry": false,
+      "console": "internalConsole"
+    },
+    {
+      "name": "Attach to .NET process",
+      "type": "coreclr",
+      "request": "attach"
+    }
+  ],
+  "compounds": [
+    {
+      "name": "Both (Service + ConfigApp)",
+      "configurations": ["Service (console debug)", "ConfigApp (WPF debug)"],
+      "stopAll": false
+    }
+  ]
+}
