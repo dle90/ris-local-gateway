@@ -28,9 +28,11 @@ public sealed class GatewayConfig
             StowUrl = "http://localhost:8080/wado/studies",
             TimeoutSeconds = 120,
             ScanIntervalSeconds = 15,
-            MaxRetries = 10,
+            MaxRetries = 1000,
             MaxParallelForwards = 4,
             CompressionEnabled = true,
+            CompressionCodec = "JPEGLS",
+            Htj2kModalities = System.Array.Empty<string>(),
         },
     };
 }
@@ -51,22 +53,18 @@ public sealed class RisConfig
 public sealed class RisEndpoints
 {
     public string SignIn { get; set; } = string.Empty;
-    public string HealthCheck { get; set; } = string.Empty;
     public string WorkList { get; set; } = string.Empty;
     public string MppsInProgress { get; set; } = string.Empty;
     public string MppsCompleted { get; set; } = string.Empty;
     public string MppsDiscontinued { get; set; } = string.Empty;
-    public string InstanceMetadata { get; set; } = string.Empty;
 
     public static RisEndpoints CreateDefault() => new()
     {
         SignIn           = "/v1/integration/auth/token",
-        HealthCheck      = "/v1/lgs/local-gateway-server/actions/health",
         WorkList         = "/v1/lgs/local-gateway-server/actions/get-work-list",
         MppsInProgress   = "/v1/lgs/local-gateway-server/actions/mpps-in-progress",
         MppsCompleted    = "/v1/lgs/local-gateway-server/actions/mpps-completed",
         MppsDiscontinued = "/v1/lgs/local-gateway-server/actions/mpps-discontinued",
-        InstanceMetadata = "/v1/lgs/local-gateway-server/actions/instance-metadata",
     };
 }
 
@@ -91,8 +89,13 @@ public sealed class PacsConfig
     /// <summary>Chu kỳ quét spool để forward nền (giây).</summary>
     public int ScanIntervalSeconds { get; set; } = 15;
 
-    /// <summary>Số lần forward thất bại tối đa trước khi chuyển dead-letter (spool/failed).</summary>
-    public int MaxRetries { get; set; } = 10;
+    /// <summary>
+    /// Cap an toàn cho lỗi HẠ TẦNG tạm thời (PACS/RIS/mạng down, thiếu token, 401/403/timeout/5xx):
+    /// số vòng quét thất bại tối đa trước khi mới chuyển dead-letter. Đặt CAO (mặc định 1000 ≈ 4h với
+    /// ScanInterval 15s) để sự cố thoáng qua không làm mất ảnh. Lỗi VĨNH VIỄN (ảnh bị từ chối: HTTP
+    /// 400/409/413/415/422) hoặc file hỏng thì dead-letter NGAY, KHÔNG đếm theo cap này.
+    /// </summary>
+    public int MaxRetries { get; set; } = 1000;
 
     /// <summary>
     /// Số instance non-prime forward SONG SONG mỗi vòng quét. An toàn >1 nhờ SpoolForwarder
@@ -102,6 +105,21 @@ public sealed class PacsConfig
     /// </summary>
     public int MaxParallelForwards { get; set; } = 4;
 
-    /// <summary>Nén JPEG 2000 Lossless trước khi STOW (luôn chỉ nén ảnh đang uncompressed).</summary>
+    /// <summary>Bật nén trước khi STOW (luôn chỉ nén ảnh đang uncompressed).</summary>
     public bool CompressionEnabled { get; set; } = true;
+
+    /// <summary>
+    /// Codec đích MẶC ĐỊNH khi transcode: "JPEGLS" (JPEG-LS Lossless — decode nhanh, hợp mọi
+    /// modality thường). Giá trị khác: "JPEG2000", "HTJ2K", "HTJ2KRPCL".
+    /// </summary>
+    public string CompressionCodec { get; set; } = "JPEGLS";
+
+    /// <summary>
+    /// Modality dùng HTJ2K Lossless RPCL (progressive) cho ảnh RẤT LỚN (mammo/DBT="MG", pathology="SM").
+    /// ⚠ MẶC ĐỊNH RỖNG (TẮT): Orthanc 1.12.10 LƯU được HTJ2K nhưng KHÔNG serve frame được
+    /// (WADO frame → HTTP 500 "Unsupported transfer syntax .201/.202", kể cả passthrough) → OHIF
+    /// không lấy được pixel. Gateway encode + Cornerstone decode đều OK; CHỈ Orthanc là blocker.
+    /// Chỉ bật (vd ["MG","SM"]) SAU KHI có Orthanc/DCMTK serve được HTJ2K. Rỗng = luôn dùng CompressionCodec.
+    /// </summary>
+    public string[] Htj2kModalities { get; set; } = System.Array.Empty<string>();
 }

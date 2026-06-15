@@ -18,7 +18,6 @@ public partial class MainWindow : Window
         if (DataContext is MainViewModel vm)
         {
             vm.Initialize();
-            PasswordBoxControl.Password = vm.Configuration.PlainPassword;
             vm.LogViewer.LinesAppended += OnLogLinesAppended;
         }
     }
@@ -29,14 +28,6 @@ public partial class MainWindow : Window
         {
             vm.LogViewer.LinesAppended -= OnLogLinesAppended;
             vm.Shutdown();
-        }
-    }
-
-    private void PasswordBoxControl_OnPasswordChanged(object sender, RoutedEventArgs e)
-    {
-        if (DataContext is MainViewModel vm && sender is PasswordBox pb)
-        {
-            vm.Configuration.PlainPassword = pb.Password;
         }
     }
 

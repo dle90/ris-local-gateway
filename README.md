@@ -57,8 +57,18 @@ sc.exe create "Medisync RIS Local Gateway" `
     start= auto `
     DisplayName= "Medisync RIS Local Gateway"
 
+# Tự khởi động lại nếu service crash (lần 1/2 sau 5s, lần 3 sau 30s; reset bộ đếm sau 1 ngày)
+sc.exe failure "Medisync RIS Local Gateway" reset= 86400 actions= restart/5000/restart/5000/restart/30000
+
+# Khởi động lại CẢ khi service tự thoát non-zero (không chỉ khi crash)
+sc.exe failureflag "Medisync RIS Local Gateway" 1
+
 sc.exe start "Medisync RIS Local Gateway"
 ```
+
+> **Tự phục hồi 2 lớp:** (1) Windows SCM tự restart cả tiến trình khi crash (cấu hình `sc failure` ở trên);
+> (2) bên trong tiến trình, `GatewayWorker` có **watchdog** quét mỗi 30s — nếu DICOM SCP chết ngầm (listener
+> không còn LISTEN trong khi tiến trình vẫn sống) thì tự dựng lại listener mà không cần restart service.
 
 Gỡ:
 ```pwsh
@@ -75,19 +85,24 @@ sc.exe delete "Medisync RIS Local Gateway"
 
 Mật khẩu trong config được mã hoá bằng **DPAPI scope LocalMachine** — chỉ decrypt được trên cùng máy.
 
-## DICOM stub hiện tại
+## Hành vi DICOM service (đã nối RIS/PACS thật)
 
-Tất cả service trả về **Success** mà không thực sự xử lý:
+| Service | Hành vi |
+|---|---|
+| C-ECHO | Trả Success |
+| C-FIND MWL | Gọi `IRisClient.FetchWorkListAsync(...)`, trả mỗi worklist item thành `DicomCFindResponse(Pending)` + Success cuối |
+| MPPS N-CREATE | Parse dataset → `IRisClient.NotifyMppsInProgressAsync(...)` |
+| MPPS N-SET | Theo status COMPLETED/DISCONTINUED → `NotifyMppsCompletedAsync` / `NotifyMppsDiscontinuedAsync` |
+| C-STORE | **Store-and-forward**: spool ra đĩa + trả Success ngay; `SpoolForwarder` (nền) transcode (mặc định JPEG-LS Lossless) + STOW-RS lên PACS qua dicomweb-proxy, kèm Bearer token, có retry + dead-letter |
 
-| Service | Hành vi stub | TODO khi nối RIS thật |
-|---|---|---|
-| C-ECHO | Trả Success | (giữ nguyên) |
-| C-FIND MWL | Trả 0 record + Success | Gọi `IRisClient.FetchWorklistAsync(...)`, yield `DicomCFindResponse(Pending)` cho mỗi item |
-| MPPS N-CREATE | Trả Success | Parse dataset → `IRisClient.NotifyMppsInProgressAsync(...)` |
-| MPPS N-SET | Trả Success | Parse status → `IRisClient.NotifyMppsCompletedAsync(...)` |
-| C-STORE | Trả Success, không lưu file | Ghi file vào `StorageDirectory` + `IRisClient.UploadInstanceMetadataAsync(...)` |
+Logic DICOM ở [src/Medisync.RisLocalGateway.Dicom/RisGatewayDicomProvider.cs](src/Medisync.RisLocalGateway.Dicom/RisGatewayDicomProvider.cs); forward nền ở [src/Medisync.RisLocalGateway.Service/SpoolForwarder.cs](src/Medisync.RisLocalGateway.Service/SpoolForwarder.cs) + [src/Medisync.RisLocalGateway.Dicom/PacsStowClient.cs](src/Medisync.RisLocalGateway.Dicom/PacsStowClient.cs).
 
-Code hook nằm ở [src/Medisync.RisLocalGateway.Dicom/RisGatewayDicomProvider.cs](src/Medisync.RisLocalGateway.Dicom/RisGatewayDicomProvider.cs) — tìm các comment `// TODO`.
+### Độ bền forward (store-and-forward)
+
+- Ảnh C-STORE được spool atomic ra đĩa (`StorageDirectory\spool`, mặc định `%ProgramData%\Medisync\RisLocalGateway\spool`) → trả Success cho modality NGAY, không chặn theo WAN, không mất ảnh nếu PACS lỗi.
+- `SpoolForwarder` quét nền, **prime-per-series** (gửi 1 instance đầu/series trước để Orthanc tạo bản ghi cha, rồi phần còn lại song song) chống đua tạo study/series.
+- Phân loại lỗi STOW: lỗi **hạ tầng tạm thời** (PACS/RIS/mạng down, thiếu token, 401/403/timeout/5xx) → thử lại tới cap an toàn cao (`Pacs.MaxRetries`, mặc định 1000 ≈ 4h); lỗi **vĩnh viễn** (ảnh bị từ chối 400/409/413/415/422, file hỏng) → chuyển dead-letter (`spool\failed`) ngay.
+- File `.dcm` dead-letter nằm ở `spool\failed`; **lý do fail** ghi sang folder RIÊNG `spool\failed-reasons\<sop>.error.json` (category Permanent/Retryable/Corrupt, số lần thử, lỗi cuối, series, thời điểm UTC). Cần xử lý thủ công (chưa có cơ chế re-drive tự động).
 
 ## Test với modality giả
 

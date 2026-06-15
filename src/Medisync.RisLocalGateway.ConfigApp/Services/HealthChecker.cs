@@ -2,11 +2,9 @@ using System;
 using System.Diagnostics;
 using System.Net.Http;
 using System.Net.Sockets;
-using System.Text;
-using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
-using Medisync.RisLocalGateway.Core.Ris.Models;
+using Medisync.RisLocalGateway.Core.Ris;
 
 namespace Medisync.RisLocalGateway.ConfigApp.Services;
 
@@ -46,7 +44,7 @@ public sealed class HealthChecker
         }
 
         // Auto-prepend scheme nếu user nhập "localhost:8100" hoặc "192.168.1.1:8100"
-        var normalized = NormalizeUrl(baseUrl);
+        var normalized = UrlHelper.NormalizeBaseUrl(baseUrl);
 
         var sw = Stopwatch.StartNew();
         try
@@ -82,7 +80,7 @@ public sealed class HealthChecker
             return (false, 0, "STOW URL trống");
         }
 
-        var probe = NormalizeUrl(stowUrl);
+        var probe = UrlHelper.NormalizeBaseUrl(stowUrl);
         probe += probe.Contains('?') ? "&limit=1" : "?limit=1";
 
         var sw = Stopwatch.StartNew();
@@ -124,45 +122,14 @@ public sealed class HealthChecker
         if (string.IsNullOrWhiteSpace(username)) return (false, "Tài khoản trống");
         if (string.IsNullOrWhiteSpace(password)) return (false, "Mật khẩu trống");
 
-        var fullUrl = CombineUrl(NormalizeUrl(baseUrl), signInPath);
-
         try
         {
-            var payload = JsonSerializer.Serialize(new { username, password });
-            using var req = new HttpRequestMessage(HttpMethod.Post, fullUrl)
-            {
-                Content = new StringContent(payload, Encoding.UTF8, "application/json"),
-            };
-
-            using var resp = await SharedHttp.SendAsync(req, HttpCompletionOption.ResponseContentRead, ct).ConfigureAwait(false);
-            var code = (int)resp.StatusCode;
-            var body = await resp.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
-
-            if (code == 200)
-            {
-                var signIn = TryDeserialize<SignInResponse>(body);
-                if (signIn is null)
-                {
-                    return (false, "HTTP 200 nhưng response không phải JSON chuẩn");
-                }
-                if (string.IsNullOrEmpty(signIn.AccessToken))
-                {
-                    return (false, "HTTP 200 nhưng response thiếu access_token");
-                }
-                return (true, "Tài khoản hợp lệ");
-            }
-
-            if (code == 400)
-            {
-                var error = TryDeserialize<RisErrorResponse>(body);
-                if (error?.Message is { Length: > 0 } msg)
-                {
-                    return (false, msg);
-                }
-                return (false, "HTTP 400 (không parse được message từ response)");
-            }
-
-            return (false, $"HTTP {code} {resp.ReasonPhrase}");
+            // DÙNG CHUNG hàm đăng nhập với gateway (RisAuth.SignInAsync) — cùng SignInRequest/
+            // SignInResponse, cùng cách parse. Khác biệt: ở đây chỉ kiểm tra, không cache token.
+            var result = await RisAuth.SignInAsync(SharedHttp, baseUrl, signInPath, username, password, ct).ConfigureAwait(false);
+            return result.IsSuccess
+                ? (true, "Tài khoản hợp lệ")
+                : (false, result.ErrorMessage ?? $"HTTP {result.HttpStatusCode}");
         }
         catch (TaskCanceledException)
         {
@@ -174,34 +141,4 @@ public sealed class HealthChecker
         }
     }
 
-    private static T? TryDeserialize<T>(string body) where T : class
-    {
-        if (string.IsNullOrWhiteSpace(body)) return null;
-        try
-        {
-            return JsonSerializer.Deserialize<T>(body);
-        }
-        catch
-        {
-            return null;
-        }
-    }
-
-    private static string CombineUrl(string baseUrl, string path)
-    {
-        var b = baseUrl.TrimEnd('/');
-        var p = path.StartsWith("/") ? path : "/" + path;
-        return b + p;
-    }
-
-    private static string NormalizeUrl(string url)
-    {
-        url = url.Trim();
-        if (url.StartsWith("http://", StringComparison.OrdinalIgnoreCase) ||
-            url.StartsWith("https://", StringComparison.OrdinalIgnoreCase))
-        {
-            return url;
-        }
-        return "http://" + url;
-    }
 }

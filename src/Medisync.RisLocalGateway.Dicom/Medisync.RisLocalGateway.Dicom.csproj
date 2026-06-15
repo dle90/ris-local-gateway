@@ -5,7 +5,7 @@
     <AssemblyName>Medisync.RisLocalGateway.Dicom</AssemblyName>
   </PropertyGroup>
   <ItemGroup>
-    <PackageReference Include="fo-dicom" Version="5.2.0" />
+    <PackageReference Include="fo-dicom" Version="5.2.5" />
     <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="8.0.2" />
   </ItemGroup>
   <ItemGroup>

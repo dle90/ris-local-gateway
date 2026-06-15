@@ -6,6 +6,7 @@ using CommunityToolkit.Mvvm.Input;
 using Medisync.RisLocalGateway.ConfigApp.Services;
 using Medisync.RisLocalGateway.ConfigApp.Views;
 using Medisync.RisLocalGateway.Core.Configuration;
+using Medisync.RisLocalGateway.Core.Ris;
 
 namespace Medisync.RisLocalGateway.ConfigApp.ViewModels;
 
@@ -20,13 +21,12 @@ public partial class ConfigurationViewModel : ObservableObject
         _health = health;
     }
 
-    // === RIS section ===
+    // === RIS section — chỉ summary read-only; chỉnh sửa ở 2 window riêng:
+    //   • Base URL + endpoint API → EndpointsWindow
+    //   • Tài khoản (username/mật khẩu) → RisAccountWindow ===
 
-    [ObservableProperty] private string _baseUrl = string.Empty;
-    [ObservableProperty] private string _username = string.Empty;
-    [ObservableProperty] private string _plainPassword = string.Empty;
-    [ObservableProperty] private string _risStatus = string.Empty;
-    [ObservableProperty] private Brush _risStatusColor = Brushes.Black;
+    [ObservableProperty] private string _risBaseUrlSummary = string.Empty;
+    [ObservableProperty] private string _risUsernameSummary = string.Empty;
 
     // === DICOM section ===
 
@@ -52,13 +52,10 @@ public partial class ConfigurationViewModel : ObservableObject
         try
         {
             var cfg = _store.Load();
-            BaseUrl = cfg.Ris.BaseUrl;
-            Username = cfg.Ris.Username;
-            PlainPassword = SecretProtector.Unprotect(cfg.Ris.ProtectedPassword);
+            ApplyRisSummary(cfg);
             AeTitle = cfg.Dicom.AeTitle;
             Port = cfg.Dicom.Port;
             StorageDirectory = cfg.Dicom.StorageDirectory;
-            SetRisStatus("Đã tải cấu hình.", ok: true);
             SetDicomStatus("Đã tải cấu hình.", ok: true);
 
             PacsStowUrl = cfg.Pacs.StowUrl;
@@ -71,94 +68,8 @@ public partial class ConfigurationViewModel : ObservableObject
         }
         catch (Exception ex)
         {
-            SetRisStatus("Không tải được cấu hình: " + ex.Message, ok: false);
             SetDicomStatus("Không tải được cấu hình: " + ex.Message, ok: false);
             SetPacsStatus("Không tải được cấu hình: " + ex.Message, ok: false);
-        }
-    }
-
-    [RelayCommand]
-    private void SaveRis()
-    {
-        try
-        {
-            if (string.IsNullOrWhiteSpace(BaseUrl))
-            {
-                SetRisStatus("Base URL không được trống.", ok: false);
-                return;
-            }
-
-            var normalizedUrl = NormalizeUrl(BaseUrl.Trim());
-            if (normalizedUrl != BaseUrl.Trim())
-            {
-                BaseUrl = normalizedUrl;
-            }
-
-            // Đọc file hiện tại, chỉ replace RIS section → tránh ghi đè DICOM nếu user
-            // đang edit dở DICOM section mà chưa save.
-            var cfg = _store.Load();
-            cfg.Ris = new RisConfig
-            {
-                BaseUrl = normalizedUrl,
-                Username = Username.Trim(),
-                ProtectedPassword = SecretProtector.Protect(PlainPassword ?? string.Empty),
-            };
-
-            _store.Save(cfg);
-            SetRisStatus("Đã lưu cấu hình RIS. Service sẽ tự nạp lại.", ok: true);
-        }
-        catch (Exception ex)
-        {
-            SetRisStatus("Lưu thất bại: " + ex.Message, ok: false);
-        }
-    }
-
-    [ObservableProperty] private bool _isTestingSignIn;
-
-    [RelayCommand]
-    private async Task TestSignInAsync()
-    {
-        try
-        {
-            IsTestingSignIn = true;
-            if (string.IsNullOrWhiteSpace(BaseUrl))
-            {
-                SetRisStatus("Hãy nhập Base URL trước khi kiểm tra.", ok: false);
-                return;
-            }
-            if (string.IsNullOrWhiteSpace(Username))
-            {
-                SetRisStatus("Hãy nhập tài khoản trước khi kiểm tra.", ok: false);
-                return;
-            }
-            if (string.IsNullOrWhiteSpace(PlainPassword))
-            {
-                SetRisStatus("Hãy nhập mật khẩu trước khi kiểm tra.", ok: false);
-                return;
-            }
-
-            // SignIn path từ saved config (vì edit ở window endpoints riêng).
-            // Nếu chưa cấu hình → dùng default.
-            var cfg = _store.Load();
-            var signInPath = cfg.Ris.Endpoints?.SignIn;
-            if (string.IsNullOrWhiteSpace(signInPath))
-            {
-                signInPath = RisEndpoints.CreateDefault().SignIn;
-            }
-
-            SetRisStatus("Đang kiểm tra đăng nhập…", ok: true);
-
-            var (ok, message) = await _health.ProbeSignInAsync(
-                BaseUrl.Trim(),
-                signInPath,
-                Username.Trim(),
-                PlainPassword ?? string.Empty);
-
-            SetRisStatus(message, ok: ok);
-        }
-        finally
-        {
-            IsTestingSignIn = false;
         }
     }
 
@@ -171,23 +82,31 @@ public partial class ConfigurationViewModel : ObservableObject
             Owner = System.Windows.Application.Current.MainWindow,
         };
         window.ShowDialog();
+        RefreshRisSummary();
     }
 
     [RelayCommand]
-    private void ReloadRis()
+    private void OpenRisAccount()
     {
-        try
+        var vm = new RisAccountViewModel(_store, _health);
+        var window = new RisAccountWindow(vm)
         {
-            var cfg = _store.Load();
-            BaseUrl = cfg.Ris.BaseUrl;
-            Username = cfg.Ris.Username;
-            PlainPassword = SecretProtector.Unprotect(cfg.Ris.ProtectedPassword);
-            SetRisStatus("Đã tải lại cấu hình RIS từ file.", ok: true);
-        }
-        catch (Exception ex)
-        {
-            SetRisStatus("Tải lại thất bại: " + ex.Message, ok: false);
-        }
+            Owner = System.Windows.Application.Current.MainWindow,
+        };
+        window.ShowDialog();
+        RefreshRisSummary();
+    }
+
+    private void RefreshRisSummary()
+    {
+        try { ApplyRisSummary(_store.Load()); }
+        catch { /* giữ summary cũ nếu đọc lỗi */ }
+    }
+
+    private void ApplyRisSummary(GatewayConfig cfg)
+    {
+        RisBaseUrlSummary = string.IsNullOrWhiteSpace(cfg.Ris.BaseUrl) ? "(chưa cấu hình)" : cfg.Ris.BaseUrl;
+        RisUsernameSummary = string.IsNullOrWhiteSpace(cfg.Ris.Username) ? "(chưa cấu hình)" : cfg.Ris.Username;
     }
 
     [RelayCommand]
@@ -267,7 +186,7 @@ public partial class ConfigurationViewModel : ObservableObject
                 SetPacsStatus("STOW URL không được trống.", ok: false);
                 return;
             }
-            var url = NormalizeUrl(PacsStowUrl.Trim());
+            var url = UrlHelper.NormalizeBaseUrl(PacsStowUrl.Trim());
             if (url != PacsStowUrl.Trim()) PacsStowUrl = url;
             if (PacsTimeoutSeconds < 1)
             {
@@ -322,12 +241,6 @@ public partial class ConfigurationViewModel : ObservableObject
         PacsStatusColor = ok ? GreenBrush() : RedBrush();
     }
 
-    private void SetRisStatus(string message, bool ok)
-    {
-        RisStatus = message;
-        RisStatusColor = ok ? GreenBrush() : RedBrush();
-    }
-
     private void SetDicomStatus(string message, bool ok)
     {
         DicomStatus = message;
@@ -336,15 +249,4 @@ public partial class ConfigurationViewModel : ObservableObject
 
     private static SolidColorBrush GreenBrush() => new(Color.FromRgb(0x2E, 0x7D, 0x32));
     private static SolidColorBrush RedBrush() => new(Color.FromRgb(0xC6, 0x28, 0x28));
-
-    private static string NormalizeUrl(string url)
-    {
-        if (string.IsNullOrWhiteSpace(url)) return url;
-        if (url.StartsWith("http://", StringComparison.OrdinalIgnoreCase) ||
-            url.StartsWith("https://", StringComparison.OrdinalIgnoreCase))
-        {
-            return url;
-        }
-        return "http://" + url;
-    }
 }

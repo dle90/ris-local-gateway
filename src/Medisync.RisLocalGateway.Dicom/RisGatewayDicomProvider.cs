@@ -13,8 +13,8 @@ namespace Medisync.RisLocalGateway.Dicom;
 
 /// <summary>
 /// One provider per incoming DICOM association. fo-dicom instantiates this for every connection.
-/// Implements C-ECHO, C-FIND (MWL), MPPS (N-CREATE/N-SET), and C-STORE — all stubbed to return Success.
-/// Replace stub bodies with real RIS calls when integrating.
+/// Implements C-ECHO, C-FIND (MWL → RIS), MPPS (N-CREATE/N-SET → RIS), and C-STORE (spool + forward STOW).
+/// MWL/MPPS gọi RIS thật qua <see cref="IRisClient"/>; C-STORE spool ra đĩa rồi SpoolForwarder forward nền.
 /// </summary>
 public sealed class RisGatewayDicomProvider :
     DicomService,

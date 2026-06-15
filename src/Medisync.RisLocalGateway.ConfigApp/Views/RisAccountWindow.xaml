@@ -1,0 +1,72 @@
+<Window x:Class="Medisync.RisLocalGateway.ConfigApp.Views.RisAccountWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Tài khoản kết nối RIS"
+        Width="560" Height="440"
+        WindowStartupLocation="CenterOwner"
+        ResizeMode="CanMinimize"
+        FontFamily="Segoe UI" FontSize="13"
+        ShowInTaskbar="False">
+
+    <DockPanel>
+        <!-- Header -->
+        <Border DockPanel.Dock="Top" Background="#1F2937" Padding="16,12">
+            <StackPanel>
+                <TextBlock Text="Tài khoản kết nối RIS"
+                           Foreground="White" FontSize="16" FontWeight="SemiBold" />
+                <TextBlock Text="Tài khoản + mật khẩu gateway dùng để đăng nhập RIS. Base URL đặt ở 'Cấu hình endpoint API'."
+                           Foreground="#9CA3AF" FontSize="11" Margin="0,2,0,0" TextWrapping="Wrap" />
+            </StackPanel>
+        </Border>
+
+        <!-- Footer -->
+        <Border DockPanel.Dock="Bottom" Background="#F3F4F6"
+                BorderBrush="#E5E7EB" BorderThickness="0,1,0,0" Padding="20,12">
+            <DockPanel>
+                <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
+                    <Button Content="🔑 Kiểm tra tài khoản" Command="{Binding TestSignInCommand}"
+                            MinWidth="160" Height="32" Margin="0,0,8,0" Padding="12,4"
+                            ToolTip="Login thử với Base URL + endpoint SignIn (từ config) + tài khoản + mật khẩu đang nhập" />
+                    <Button Content="Hủy" Command="{Binding CancelCommand}"
+                            MinWidth="80" Height="32" Margin="0,0,8,0" Padding="12,4" />
+                    <Button Content="Lưu tài khoản" Command="{Binding SaveCommand}"
+                            Background="#1976D2" Foreground="White" FontWeight="SemiBold"
+                            MinWidth="140" Height="32" Padding="12,4" BorderThickness="0" />
+                </StackPanel>
+
+                <TextBlock Text="{Binding Status}"
+                           Foreground="{Binding StatusColor}"
+                           VerticalAlignment="Center" TextWrapping="Wrap"
+                           Margin="0,0,16,0" />
+            </DockPanel>
+        </Border>
+
+        <!-- Form -->
+        <ScrollViewer VerticalScrollBarVisibility="Auto">
+            <StackPanel Margin="20,16">
+
+                <TextBlock Text="Base URL (chỉ đọc — đặt ở 'Cấu hình endpoint API')"
+                           Foreground="#6B7280" FontSize="11" Margin="0,0,0,2" />
+                <TextBox Text="{Binding BaseUrlInfo, Mode=OneWay}" IsReadOnly="True"
+                         Background="#F3F4F6" FontFamily="Consolas, Courier New" />
+
+                <TextBlock Text="Tài khoản" FontWeight="SemiBold" Margin="0,16,0,2" />
+                <TextBox Text="{Binding Username, UpdateSourceTrigger=PropertyChanged}" />
+
+                <TextBlock Text="Mật khẩu" FontWeight="SemiBold" Margin="0,16,0,2" />
+                <PasswordBox x:Name="PasswordBoxControl"
+                             PasswordChanged="PasswordBoxControl_OnPasswordChanged" />
+
+                <Border Background="#FEF3C7" BorderBrush="#FCD34D" BorderThickness="1"
+                        CornerRadius="4" Padding="12,8" Margin="0,20,0,0">
+                    <StackPanel>
+                        <TextBlock FontWeight="SemiBold" Text="💡 Ghi chú" Margin="0,0,0,4" />
+                        <TextBlock TextWrapping="Wrap" FontSize="11"
+                                   Text="• Mật khẩu được mã hoá bằng DPAPI (LocalMachine) khi lưu — chỉ giải mã được trên chính máy này. • 'Kiểm tra tài khoản' dùng Base URL + endpoint SignIn đã LƯU; nếu vừa đổi ở window endpoint, hãy lưu bên đó trước." />
+                    </StackPanel>
+                </Border>
+
+            </StackPanel>
+        </ScrollViewer>
+    </DockPanel>
+</Window>

@@ -6,6 +6,8 @@
     <OutputType>WinExe</OutputType>
     <UseWPF>true</UseWPF>
     <ApplicationManifest>app.manifest</ApplicationManifest>
+    <!-- Icon exe → hiện ở taskbar + Explorer; WPF window không set Icon sẽ tự dùng icon exe này. -->
+    <ApplicationIcon>appicon.ico</ApplicationIcon>
   </PropertyGroup>
   <ItemGroup>
     <PackageReference Include="CommunityToolkit.Mvvm" Version="8.3.2" />

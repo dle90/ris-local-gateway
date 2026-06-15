@@ -215,177 +215,189 @@
                 </ScrollViewer>
             </TabItem>
 
-            <!-- ============ Tab 2: CẤU HÌNH ============ -->
+            <!-- ============ Tab 2: CẤU HÌNH (3 tab con) ============ -->
             <TabItem Header="Cấu hình" FontSize="13" Padding="14,8">
-                <ScrollViewer VerticalScrollBarVisibility="Auto">
-                    <StackPanel Margin="20" DataContext="{Binding Configuration}">
+                <TabControl DataContext="{Binding Configuration}" Margin="12"
+                            BorderThickness="1" BorderBrush="#E5E7EB" Background="Transparent">
 
-                        <!-- =========== Card 1: Kết nối RIS =========== -->
-                        <Border Background="#F9FAFB" BorderBrush="#E5E7EB"
-                                BorderThickness="1" CornerRadius="6" Padding="20" Margin="0,0,0,16">
-                            <StackPanel>
-                                <TextBlock Text="Kết nối RIS"
-                                           FontSize="16" FontWeight="Bold" />
-                                <TextBlock Text="URL và tài khoản truy cập RIS từ gateway."
-                                           Foreground="#6B7280" FontSize="11" Margin="0,2,0,12" />
+                    <!-- Tab con: Kết nối RIS (launchers) -->
+                    <TabItem Header="Kết nối RIS" FontSize="13" Padding="12,6">
+                        <ScrollViewer VerticalScrollBarVisibility="Auto">
+                            <StackPanel Margin="20">
+                                <Border Background="#F9FAFB" BorderBrush="#E5E7EB"
+                                        BorderThickness="1" CornerRadius="6" Padding="20">
+                                    <StackPanel>
+                                        <TextBlock Text="Kết nối RIS" FontSize="16" FontWeight="Bold" />
+                                        <TextBlock Text="URL/endpoint API và tài khoản truy cập RIS — mỗi nhóm cấu hình trong một cửa sổ riêng."
+                                                   Foreground="#6B7280" FontSize="11" Margin="0,2,0,16" TextWrapping="Wrap" />
 
-                                <Label Content="Base URL" />
-                                <TextBox Text="{Binding BaseUrl, UpdateSourceTrigger=PropertyChanged}" />
+                                        <!-- Summary (read-only) -->
+                                        <Grid Margin="0,0,0,6">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="100" />
+                                                <ColumnDefinition Width="*" />
+                                            </Grid.ColumnDefinitions>
+                                            <TextBlock Grid.Column="0" Text="Base URL:" Foreground="#6B7280" />
+                                            <TextBlock Grid.Column="1" Text="{Binding RisBaseUrlSummary}"
+                                                       FontWeight="SemiBold" TextTrimming="CharacterEllipsis" />
+                                        </Grid>
+                                        <Grid Margin="0,0,0,16">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="100" />
+                                                <ColumnDefinition Width="*" />
+                                            </Grid.ColumnDefinitions>
+                                            <TextBlock Grid.Column="0" Text="Tài khoản:" Foreground="#6B7280" />
+                                            <TextBlock Grid.Column="1" Text="{Binding RisUsernameSummary}"
+                                                       FontWeight="SemiBold" TextTrimming="CharacterEllipsis" />
+                                        </Grid>
 
-                                <Label Content="Tài khoản" />
-                                <TextBox Text="{Binding Username, UpdateSourceTrigger=PropertyChanged}" />
-
-                                <Label Content="Mật khẩu" />
-                                <PasswordBox x:Name="PasswordBoxControl"
-                                             PasswordChanged="PasswordBoxControl_OnPasswordChanged" />
-
-                                <Border BorderBrush="#E5E7EB" BorderThickness="0,1,0,0" Margin="0,16,0,0" Padding="0,12,0,0">
-                                    <DockPanel>
-                                        <StackPanel DockPanel.Dock="Left" Orientation="Horizontal" HorizontalAlignment="Left">
+                                        <!-- Launchers -->
+                                        <StackPanel Orientation="Horizontal">
                                             <Button Content="⚙ Cấu hình endpoint API…"
                                                     Command="{Binding OpenEndpointsCommand}"
-                                                    MinWidth="200" Height="32" Padding="12,4" Margin="0,0,8,0"
-                                                    ToolTip="Cấu hình sub-URL cho từng API của RIS (cho phép đổi v1/v2/v3…)" />
-                                            <Button Content="🔑 Kiểm tra tài khoản"
-                                                    Command="{Binding TestSignInCommand}"
-                                                    MinWidth="170" Height="32" Padding="12,4"
-                                                    ToolTip="Login thử với Base URL + endpoint SignIn + tài khoản + mật khẩu đang nhập trong form" />
+                                                    MinWidth="220" Height="34" Padding="12,4" Margin="0,0,10,0"
+                                                    ToolTip="Base URL + sub-URL của từng API RIS (đổi v1/v2/v3… không cần rebuild)" />
+                                            <Button Content="🔌 Tài khoản kết nối RIS…"
+                                                    Command="{Binding OpenRisAccountCommand}"
+                                                    MinWidth="210" Height="34" Padding="12,4"
+                                                    ToolTip="Tài khoản + mật khẩu đăng nhập RIS, có nút kiểm tra đăng nhập" />
                                         </StackPanel>
-                                        <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
-                                            <Button Content="Tải lại" Command="{Binding ReloadRisCommand}"
-                                                    MinWidth="100" Height="32" Margin="0,0,8,0" Padding="12,4" />
-                                            <Button Content="Lưu kết nối RIS" Command="{Binding SaveRisCommand}"
-                                                    Background="#1976D2" Foreground="White" FontWeight="SemiBold"
-                                                    MinWidth="160" Height="32" Padding="12,4" BorderThickness="0" />
-                                        </StackPanel>
-                                    </DockPanel>
+                                    </StackPanel>
                                 </Border>
-
-                                <TextBlock Text="{Binding RisStatus}"
-                                           Foreground="{Binding RisStatusColor}"
-                                           Margin="0,12,0,0" TextWrapping="Wrap" />
                             </StackPanel>
-                        </Border>
+                        </ScrollViewer>
+                    </TabItem>
 
-                        <!-- =========== Card 2: Cấu hình DICOM SCP =========== -->
-                        <Border Background="#F9FAFB" BorderBrush="#E5E7EB"
-                                BorderThickness="1" CornerRadius="6" Padding="20" Margin="0,0,0,16">
-                            <StackPanel>
-                                <TextBlock Text="Cấu hình DICOM SCP"
-                                           FontSize="16" FontWeight="Bold" />
-                                <TextBlock Text="AE Title và port lắng nghe kết nối từ modality."
-                                           Foreground="#6B7280" FontSize="11" Margin="0,2,0,12" />
+                    <!-- Tab con: Cấu hình DICOM SCP -->
+                    <TabItem Header="Cấu hình DICOM SCP" FontSize="13" Padding="12,6">
+                        <ScrollViewer VerticalScrollBarVisibility="Auto">
+                            <StackPanel Margin="20">
+                                <Border Background="#F9FAFB" BorderBrush="#E5E7EB"
+                                        BorderThickness="1" CornerRadius="6" Padding="20">
+                                    <StackPanel>
+                                        <TextBlock Text="Cấu hình DICOM SCP"
+                                                   FontSize="16" FontWeight="Bold" />
+                                        <TextBlock Text="AE Title và port lắng nghe kết nối từ modality."
+                                                   Foreground="#6B7280" FontSize="11" Margin="0,2,0,12" />
 
-                                <Grid>
-                                    <Grid.ColumnDefinitions>
-                                        <ColumnDefinition Width="*" />
-                                        <ColumnDefinition Width="120" />
-                                    </Grid.ColumnDefinitions>
-                                    <StackPanel Grid.Column="0" Margin="0,0,8,0">
-                                        <Label Content="AE Title" />
-                                        <TextBox Text="{Binding AeTitle, UpdateSourceTrigger=PropertyChanged}" />
+                                        <Grid>
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="*" />
+                                                <ColumnDefinition Width="120" />
+                                            </Grid.ColumnDefinitions>
+                                            <StackPanel Grid.Column="0" Margin="0,0,8,0">
+                                                <Label Content="AE Title" />
+                                                <TextBox Text="{Binding AeTitle, UpdateSourceTrigger=PropertyChanged}" />
+                                            </StackPanel>
+                                            <StackPanel Grid.Column="1">
+                                                <Label Content="Port" />
+                                                <TextBox Text="{Binding Port, UpdateSourceTrigger=PropertyChanged}" />
+                                            </StackPanel>
+                                        </Grid>
+
+                                        <Label Content="Thư mục lưu DICOM (để trống = mặc định)" />
+                                        <Grid>
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="*" />
+                                                <ColumnDefinition Width="Auto" />
+                                            </Grid.ColumnDefinitions>
+                                            <TextBox Grid.Column="0"
+                                                     Text="{Binding StorageDirectory, UpdateSourceTrigger=PropertyChanged}"
+                                                     ToolTip="Thư mục lưu ảnh DICOM nhận được (hàng đợi spool chờ forward). Để trống = mặc định %ProgramData%\Medisync\RisLocalGateway\spool." />
+                                            <Button Grid.Column="1" Content="Chọn…"
+                                                    Command="{Binding BrowseStorageDirectoryCommand}"
+                                                    MinWidth="72" Margin="6,0,0,0" Padding="10,4" />
+                                        </Grid>
+
+                                        <StackPanel Orientation="Horizontal"
+                                                    HorizontalAlignment="Right" Margin="0,16,0,0">
+                                            <Button Content="Tải lại" Command="{Binding ReloadDicomCommand}"
+                                                    MinWidth="100" Height="32" Margin="0,0,8,0" Padding="12,4" />
+                                            <Button Content="Lưu cấu hình DICOM" Command="{Binding SaveDicomCommand}"
+                                                    Background="#1976D2" Foreground="White" FontWeight="SemiBold"
+                                                    MinWidth="180" Height="32" Padding="12,4" BorderThickness="0" />
+                                        </StackPanel>
+
+                                        <TextBlock Text="{Binding DicomStatus}"
+                                                   Foreground="{Binding DicomStatusColor}"
+                                                   Margin="0,12,0,0" TextWrapping="Wrap" />
                                     </StackPanel>
-                                    <StackPanel Grid.Column="1">
-                                        <Label Content="Port" />
-                                        <TextBox Text="{Binding Port, UpdateSourceTrigger=PropertyChanged}" />
-                                    </StackPanel>
-                                </Grid>
-
-                                <Label Content="Thư mục lưu DICOM (để trống = mặc định)" />
-                                <Grid>
-                                    <Grid.ColumnDefinitions>
-                                        <ColumnDefinition Width="*" />
-                                        <ColumnDefinition Width="Auto" />
-                                    </Grid.ColumnDefinitions>
-                                    <TextBox Grid.Column="0"
-                                             Text="{Binding StorageDirectory, UpdateSourceTrigger=PropertyChanged}"
-                                             ToolTip="Thư mục lưu ảnh DICOM nhận được (hàng đợi spool chờ forward). Để trống = mặc định %ProgramData%\Medisync\RisLocalGateway\spool." />
-                                    <Button Grid.Column="1" Content="Chọn…"
-                                            Command="{Binding BrowseStorageDirectoryCommand}"
-                                            MinWidth="72" Margin="6,0,0,0" Padding="10,4" />
-                                </Grid>
-
-                                <StackPanel Orientation="Horizontal"
-                                            HorizontalAlignment="Right" Margin="0,16,0,0">
-                                    <Button Content="Tải lại" Command="{Binding ReloadDicomCommand}"
-                                            MinWidth="100" Height="32" Margin="0,0,8,0" Padding="12,4" />
-                                    <Button Content="Lưu cấu hình DICOM" Command="{Binding SaveDicomCommand}"
-                                            Background="#1976D2" Foreground="White" FontWeight="SemiBold"
-                                            MinWidth="180" Height="32" Padding="12,4" BorderThickness="0" />
-                                </StackPanel>
-
-                                <TextBlock Text="{Binding DicomStatus}"
-                                           Foreground="{Binding DicomStatusColor}"
-                                           Margin="0,12,0,0" TextWrapping="Wrap" />
+                                </Border>
                             </StackPanel>
-                        </Border>
+                        </ScrollViewer>
+                    </TabItem>
 
-                        <!-- =========== Card 3: Kết nối PACS (STOW) =========== -->
-                        <Border Background="#F9FAFB" BorderBrush="#E5E7EB"
-                                BorderThickness="1" CornerRadius="6" Padding="20">
-                            <StackPanel>
-                                <TextBlock Text="Kết nối PACS (STOW)"
-                                           FontSize="16" FontWeight="Bold" />
-                                <TextBlock Text="Gateway nén (nếu cần) rồi đẩy ảnh tới PACS qua STOW-RS; có spool + retry nền."
-                                           Foreground="#6B7280" FontSize="11" Margin="0,2,0,12" />
+                    <!-- Tab con: Kết nối PACS (STOW) -->
+                    <TabItem Header="Kết nối PACS" FontSize="13" Padding="12,6">
+                        <ScrollViewer VerticalScrollBarVisibility="Auto">
+                            <StackPanel Margin="20">
+                                <Border Background="#F9FAFB" BorderBrush="#E5E7EB"
+                                        BorderThickness="1" CornerRadius="6" Padding="20">
+                                    <StackPanel>
+                                        <TextBlock Text="Kết nối PACS (STOW)"
+                                                   FontSize="16" FontWeight="Bold" />
+                                        <TextBlock Text="Gateway nén (nếu cần) rồi đẩy ảnh tới PACS qua STOW-RS; có spool + retry nền."
+                                                   Foreground="#6B7280" FontSize="11" Margin="0,2,0,12" />
 
-                                <Label Content="STOW URL (qua dicomweb-proxy)" />
-                                <TextBox Text="{Binding PacsStowUrl, UpdateSourceTrigger=PropertyChanged}"
-                                         ToolTip="Endpoint STOW-RS của PACS (đi qua dicomweb-proxy). Môi trường local: http://localhost:8080/wado/studies" />
+                                        <Label Content="STOW URL (qua dicomweb-proxy)" />
+                                        <TextBox Text="{Binding PacsStowUrl, UpdateSourceTrigger=PropertyChanged}"
+                                                 ToolTip="Endpoint STOW-RS của PACS (đi qua dicomweb-proxy). Môi trường local: http://localhost:8080/wado/studies" />
 
-                                <CheckBox Content="Nén trước khi gửi (JPEG 2000 Lossless)"
-                                          IsChecked="{Binding PacsCompressionEnabled}" Margin="0,14,0,0"
-                                          ToolTip="Bật: ảnh uncompressed được nén JPEG 2000 Lossless trước khi gửi (giảm băng thông + lưu trữ, không mất chẩn đoán). Ảnh đã nén giữ nguyên." />
+                                        <CheckBox Content="Nén trước khi gửi (JPEG-LS Lossless mặc định)"
+                                                  IsChecked="{Binding PacsCompressionEnabled}" Margin="0,14,0,0"
+                                                  ToolTip="Bật: ảnh uncompressed được nén lossless trước khi gửi (giảm băng thông + lưu trữ, không mất chẩn đoán). Ảnh đã nén giữ nguyên." />
 
-                                <Grid Margin="0,14,0,0">
-                                    <Grid.ColumnDefinitions>
-                                        <ColumnDefinition Width="*" />
-                                        <ColumnDefinition Width="8" />
-                                        <ColumnDefinition Width="*" />
-                                        <ColumnDefinition Width="8" />
-                                        <ColumnDefinition Width="*" />
-                                        <ColumnDefinition Width="8" />
-                                        <ColumnDefinition Width="*" />
-                                    </Grid.ColumnDefinitions>
-                                    <StackPanel Grid.Column="0"
-                                                ToolTip="Thời gian tối đa cho MỘT lần gửi (STOW) 1 ảnh lên PACS. Quá hạn = coi là thất bại → thử lại. Ảnh lớn / mạng chậm thì tăng.">
-                                        <Label Content="Timeout (giây)" />
-                                        <TextBox Text="{Binding PacsTimeoutSeconds, UpdateSourceTrigger=PropertyChanged}" />
+                                        <Grid Margin="0,14,0,0">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="*" />
+                                                <ColumnDefinition Width="8" />
+                                                <ColumnDefinition Width="*" />
+                                                <ColumnDefinition Width="8" />
+                                                <ColumnDefinition Width="*" />
+                                                <ColumnDefinition Width="8" />
+                                                <ColumnDefinition Width="*" />
+                                            </Grid.ColumnDefinitions>
+                                            <StackPanel Grid.Column="0"
+                                                        ToolTip="Thời gian tối đa cho MỘT lần gửi (STOW) 1 ảnh lên PACS. Quá hạn = coi là thất bại → thử lại. Ảnh lớn / mạng chậm thì tăng.">
+                                                <Label Content="Timeout (giây)" />
+                                                <TextBox Text="{Binding PacsTimeoutSeconds, UpdateSourceTrigger=PropertyChanged}" />
+                                            </StackPanel>
+                                            <StackPanel Grid.Column="2"
+                                                        ToolTip="Chu kỳ quét hàng đợi (spool) để gửi ảnh đang chờ; cũng là nhịp thử lại. Giảm = gửi gần realtime hơn, nhưng thử lại dày khi PACS lỗi.">
+                                                <Label Content="Quét spool (giây)" />
+                                                <TextBox Text="{Binding PacsScanIntervalSeconds, UpdateSourceTrigger=PropertyChanged}" />
+                                            </StackPanel>
+                                            <StackPanel Grid.Column="4"
+                                                        ToolTip="Cap an toàn cho lỗi HẠ TẦNG tạm thời (PACS/RIS/mạng down): số vòng quét thất bại tối đa trước khi đưa vào spool/failed. Lỗi ảnh bị từ chối (vĩnh viễn) thì dead-letter ngay, không đếm theo cap này.">
+                                                <Label Content="Số lần retry" />
+                                                <TextBox Text="{Binding PacsMaxRetries, UpdateSourceTrigger=PropertyChanged}" />
+                                            </StackPanel>
+                                            <StackPanel Grid.Column="6"
+                                                        ToolTip="Số ảnh gửi đồng thời mỗi vòng quét. Tăng để xả backlog nhanh nếu uplink + PACS chịu được; uplink hẹp thì tăng cũng nghẽn.">
+                                                <Label Content="Forward song song" />
+                                                <TextBox Text="{Binding PacsMaxParallelForwards, UpdateSourceTrigger=PropertyChanged}" />
+                                            </StackPanel>
+                                        </Grid>
+
+                                        <StackPanel Orientation="Horizontal"
+                                                    HorizontalAlignment="Right" Margin="0,16,0,0">
+                                            <Button Content="Tải lại" Command="{Binding ReloadPacsCommand}"
+                                                    MinWidth="100" Height="32" Margin="0,0,8,0" Padding="12,4" />
+                                            <Button Content="Lưu cấu hình PACS" Command="{Binding SavePacsCommand}"
+                                                    Background="#1976D2" Foreground="White" FontWeight="SemiBold"
+                                                    MinWidth="180" Height="32" Padding="12,4" BorderThickness="0" />
+                                        </StackPanel>
+
+                                        <TextBlock Text="{Binding PacsStatus}"
+                                                   Foreground="{Binding PacsStatusColor}"
+                                                   Margin="0,12,0,0" TextWrapping="Wrap" />
                                     </StackPanel>
-                                    <StackPanel Grid.Column="2"
-                                                ToolTip="Chu kỳ quét hàng đợi (spool) để gửi ảnh đang chờ; cũng là nhịp thử lại. Giảm = gửi gần realtime hơn, nhưng thử lại dày khi PACS lỗi.">
-                                        <Label Content="Quét spool (giây)" />
-                                        <TextBox Text="{Binding PacsScanIntervalSeconds, UpdateSourceTrigger=PropertyChanged}" />
-                                    </StackPanel>
-                                    <StackPanel Grid.Column="4"
-                                                ToolTip="Số lần gửi thất bại tối đa cho 1 ảnh trước khi đưa vào spool/failed (KHÔNG mất ảnh). Cửa sổ chịu lỗi ≈ Số lần retry × Quét spool.">
-                                        <Label Content="Số lần retry" />
-                                        <TextBox Text="{Binding PacsMaxRetries, UpdateSourceTrigger=PropertyChanged}" />
-                                    </StackPanel>
-                                    <StackPanel Grid.Column="6"
-                                                ToolTip="Số ảnh gửi đồng thời mỗi vòng quét. Tăng để xả backlog nhanh nếu uplink + PACS chịu được; uplink hẹp thì tăng cũng nghẽn.">
-                                        <Label Content="Forward song song" />
-                                        <TextBox Text="{Binding PacsMaxParallelForwards, UpdateSourceTrigger=PropertyChanged}" />
-                                    </StackPanel>
-                                </Grid>
-
-                                <StackPanel Orientation="Horizontal"
-                                            HorizontalAlignment="Right" Margin="0,16,0,0">
-                                    <Button Content="Tải lại" Command="{Binding ReloadPacsCommand}"
-                                            MinWidth="100" Height="32" Margin="0,0,8,0" Padding="12,4" />
-                                    <Button Content="Lưu cấu hình PACS" Command="{Binding SavePacsCommand}"
-                                            Background="#1976D2" Foreground="White" FontWeight="SemiBold"
-                                            MinWidth="180" Height="32" Padding="12,4" BorderThickness="0" />
-                                </StackPanel>
-
-                                <TextBlock Text="{Binding PacsStatus}"
-                                           Foreground="{Binding PacsStatusColor}"
-                                           Margin="0,12,0,0" TextWrapping="Wrap" />
+                                </Border>
                             </StackPanel>
-                        </Border>
+                        </ScrollViewer>
+                    </TabItem>
 
-                    </StackPanel>
-                </ScrollViewer>
+                </TabControl>
             </TabItem>
 
             <!-- ============ Tab 3: NHẬT KÝ ============ -->

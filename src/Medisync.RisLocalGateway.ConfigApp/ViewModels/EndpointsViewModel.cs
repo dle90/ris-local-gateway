@@ -3,6 +3,7 @@ using System.Windows.Media;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using Medisync.RisLocalGateway.Core.Configuration;
+using Medisync.RisLocalGateway.Core.Ris;
 
 namespace Medisync.RisLocalGateway.ConfigApp.ViewModels;
 
@@ -15,13 +16,12 @@ public partial class EndpointsViewModel : ObservableObject
         _store = store;
     }
 
+    [ObservableProperty] private string _baseUrl = string.Empty;
     [ObservableProperty] private string _signIn = string.Empty;
-    [ObservableProperty] private string _healthCheck = string.Empty;
     [ObservableProperty] private string _workList = string.Empty;
     [ObservableProperty] private string _mppsInProgress = string.Empty;
     [ObservableProperty] private string _mppsCompleted = string.Empty;
     [ObservableProperty] private string _mppsDiscontinued = string.Empty;
-    [ObservableProperty] private string _instanceMetadata = string.Empty;
 
     [ObservableProperty] private string _status = string.Empty;
     [ObservableProperty] private Brush _statusColor = Brushes.Black;
@@ -32,14 +32,13 @@ public partial class EndpointsViewModel : ObservableObject
         try
         {
             var cfg = _store.Load();
+            BaseUrl = cfg.Ris.BaseUrl;
             var ep = cfg.Ris.Endpoints ?? RisEndpoints.CreateDefault();
             SignIn = ep.SignIn;
-            HealthCheck = ep.HealthCheck;
             WorkList = ep.WorkList;
             MppsInProgress = ep.MppsInProgress;
             MppsCompleted = ep.MppsCompleted;
             MppsDiscontinued = ep.MppsDiscontinued;
-            InstanceMetadata = ep.InstanceMetadata;
             SetStatus("Đã tải endpoint.", ok: true);
         }
         catch (Exception ex)
@@ -53,19 +52,27 @@ public partial class EndpointsViewModel : ObservableObject
     {
         try
         {
+            if (string.IsNullOrWhiteSpace(BaseUrl))
+            {
+                SetStatus("Base URL không được trống.", ok: false);
+                return;
+            }
+            var normalizedUrl = UrlHelper.NormalizeBaseUrl(BaseUrl.Trim());
+            if (normalizedUrl != BaseUrl) BaseUrl = normalizedUrl;
+
+            // Mutate cfg.Ris IN-PLACE → giữ nguyên Username/ProtectedPassword (đặt ở window tài khoản).
             var cfg = _store.Load();
+            cfg.Ris.BaseUrl = normalizedUrl;
             cfg.Ris.Endpoints = new RisEndpoints
             {
                 SignIn = SignIn?.Trim() ?? string.Empty,
-                HealthCheck = HealthCheck?.Trim() ?? string.Empty,
                 WorkList = WorkList?.Trim() ?? string.Empty,
                 MppsInProgress = MppsInProgress?.Trim() ?? string.Empty,
                 MppsCompleted = MppsCompleted?.Trim() ?? string.Empty,
                 MppsDiscontinued = MppsDiscontinued?.Trim() ?? string.Empty,
-                InstanceMetadata = InstanceMetadata?.Trim() ?? string.Empty,
             };
             _store.Save(cfg);
-            SetStatus("Đã lưu endpoint. Service sẽ tự nạp lại.", ok: true);
+            SetStatus("Đã lưu Base URL + endpoint. Service sẽ tự nạp lại.", ok: true);
             ShouldClose = true;
         }
         catch (Exception ex)
@@ -79,12 +86,10 @@ public partial class EndpointsViewModel : ObservableObject
     {
         var def = RisEndpoints.CreateDefault();
         SignIn = def.SignIn;
-        HealthCheck = def.HealthCheck;
         WorkList = def.WorkList;
         MppsInProgress = def.MppsInProgress;
         MppsCompleted = def.MppsCompleted;
         MppsDiscontinued = def.MppsDiscontinued;
-        InstanceMetadata = def.InstanceMetadata;
         SetStatus("Đã reset về giá trị mặc định (chưa lưu — bấm Lưu để áp dụng).", ok: true);
     }
 

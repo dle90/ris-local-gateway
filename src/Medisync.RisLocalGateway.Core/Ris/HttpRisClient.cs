@@ -390,43 +390,24 @@ public sealed class HttpRisClient : IRisClient, IDisposable
     {
         try
         {
-            var signInUrl = CombineUrl(cfg.Ris.BaseUrl, GetEndpoint(cfg, e => e.SignIn));
             var password = SecretProtector.Unprotect(cfg.Ris.ProtectedPassword);
 
-            using var req = new HttpRequestMessage(HttpMethod.Post, signInUrl)
-            {
-                Content = JsonContent.Create(new SignInRequest
-                {
-                    Username = cfg.Ris.Username,
-                    Password = password,
-                }),
-            };
+            // DÙNG CHUNG hàm đăng nhập với nút "Kiểm tra tài khoản" (ConfigApp) — RisAuth.SignInAsync.
+            // Khác biệt duy nhất ở đây: thành công thì CACHE token cho các call sau dùng.
+            var result = await RisAuth.SignInAsync(
+                _http, cfg.Ris.BaseUrl, GetEndpoint(cfg, e => e.SignIn), cfg.Ris.Username, password, ct)
+                .ConfigureAwait(false);
 
-            using var resp = await _http.SendAsync(req, HttpCompletionOption.ResponseContentRead, ct).ConfigureAwait(false);
-            var code = (int)resp.StatusCode;
-            var body = await resp.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
-
-            if (code != 200)
+            if (!result.IsSuccess || result.Data is null)
             {
-                var err = TryDeserialize<RisErrorResponse>(body);
-                _logger.LogError("Login failed: HTTP {Code} — {Message}", code, err?.Message ?? resp.ReasonPhrase);
+                _logger.LogError("Login failed: HTTP {Code} — {Message}", result.HttpStatusCode, result.ErrorMessage);
                 _cachedToken = null;
                 _tokenExpiresAt = DateTimeOffset.MinValue;
                 return;
             }
 
-            // Auth endpoint trả raw SignInResponse, KHÔNG wrap qua RisBaseResponse
-            var signIn = TryDeserialize<SignInResponse>(body);
-            if (signIn?.AccessToken is null)
-            {
-                _logger.LogError("Login response thiếu access_token");
-                _cachedToken = null;
-                _tokenExpiresAt = DateTimeOffset.MinValue;
-                return;
-            }
-
-            _cachedToken = signIn.AccessToken;
-            _tokenExpiresAt = DateTimeOffset.UtcNow.AddSeconds(signIn.ExpiresIn > 0 ? signIn.ExpiresIn : 3600);
+            _cachedToken = result.Data.AccessToken;
+            _tokenExpiresAt = DateTimeOffset.UtcNow.AddSeconds(result.Data.ExpiresIn > 0 ? result.Data.ExpiresIn : 3600);
             _logger.LogInformation("Login OK — token cached, expires at {Expiry}", _tokenExpiresAt);
         }
         catch (Exception ex)
@@ -516,23 +497,8 @@ public sealed class HttpRisClient : IRisClient, IDisposable
         return string.IsNullOrWhiteSpace(path) ? selector(RisEndpoints.CreateDefault()) : path;
     }
 
-    private static string CombineUrl(string baseUrl, string path)
-    {
-        var b = NormalizeBaseUrl(baseUrl).TrimEnd('/');
-        var p = path.StartsWith("/") ? path : "/" + path;
-        return b + p;
-    }
-
-    private static string NormalizeBaseUrl(string url)
-    {
-        url = url.Trim();
-        if (url.StartsWith("http://", StringComparison.OrdinalIgnoreCase) ||
-            url.StartsWith("https://", StringComparison.OrdinalIgnoreCase))
-        {
-            return url;
-        }
-        return "http://" + url;
-    }
+    // Ghép URL dùng helper chung (UrlHelper) — không tự normalize riêng nữa.
+    private static string CombineUrl(string baseUrl, string path) => UrlHelper.Combine(baseUrl, path);
 
     private static T? TryDeserialize<T>(string body) where T : class
     {

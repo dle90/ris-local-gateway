@@ -18,11 +18,11 @@
     <PackageReference Include="Serilog.Settings.Configuration" Version="8.0.4" />
     <PackageReference Include="Serilog.Sinks.Console" Version="6.0.0" />
     <PackageReference Include="Serilog.Sinks.File" Version="6.0.0" />
-    <!-- Native DICOM codecs (JPEG 2000 / JPEG-LS / JPEG / RLE) for transcoding before STOW.
+    <!-- Native DICOM codecs (JPEG-LS / HTJ2K / JPEG 2000 / JPEG / RLE) for transcoding before STOW.
          fo-dicom 5.x core has NO native codecs; this package provides them + the type
          FellowOakDicom.Imaging.NativeCodec.NativeTranscoderManager (registered in Program.cs).
-         If NuGet flags a version conflict with fo-dicom 5.2.0, pick the matching
-         fo-dicom.Codecs version via the IDE NuGet manager. -->
+         fo-dicom.Codecs 5.16.5.1 requires fo-dicom >= 5.2.5; the Dicom project pins fo-dicom 5.2.5
+         to match (avoids the NU1605 package-downgrade error). -->
     <PackageReference Include="fo-dicom.Codecs" Version="5.16.5.1" />
   </ItemGroup>
   <ItemGroup>

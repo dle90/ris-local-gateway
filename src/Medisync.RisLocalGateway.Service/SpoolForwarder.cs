@@ -136,7 +136,11 @@ public sealed class SpoolForwarder : BackgroundService
         finally { _primeLane.Release(); }
     }
 
-    /// <summary>STOW 1 file: OK → Delete (dọn state); fail → retry; quá maxRetries → dead-letter. Trả OK?</summary>
+    /// <summary>
+    /// STOW 1 file. OK → Delete (dọn state). Lỗi VĨNH VIỄN (ảnh bị từ chối / file hỏng) → dead-letter
+    /// NGAY. Lỗi HẠ TẦNG tạm thời (PACS/RIS/mạng down) → retry tới cap an toàn cao (maxRetries) rồi
+    /// mới dead-letter. Trả về true CHỈ khi forward thành công (để prime-gate biết series đã prime).
+    /// </summary>
     private async Task<bool> ForwardOneAsync(string path, int maxRetries, CancellationToken ct)
     {
         DicomFile file;
@@ -147,33 +151,49 @@ public sealed class SpoolForwarder : BackgroundService
         catch (Exception ex)
         {
             _logger.LogError(ex, "Mở spool file lỗi (hỏng?) → dead-letter: {Path}", path);
-            _spool.MoveToFailed(path);
+            _spool.MoveToFailed(path, "Corrupt", 0, "Mở DICOM lỗi: " + ex.Message);
             _attempts.TryRemove(path, out _);
             return false;
         }
 
-        bool ok;
-        try { ok = await _pacs.ForwardAsync(file, ct).ConfigureAwait(false); }
+        ForwardResult result;
+        try { result = await _pacs.ForwardAsync(file, ct).ConfigureAwait(false); }
         catch (OperationCanceledException) { throw; }
-        catch (Exception ex) { _logger.LogError(ex, "Forward spool file exception: {Path}", path); ok = false; }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Forward spool file exception: {Path}", path);
+            result = ForwardResult.Retryable("Forward exception: " + ex.Message);
+        }
 
-        if (ok)
+        if (result.Outcome == ForwardOutcome.Success)
         {
             _spool.Delete(path);
             _attempts.TryRemove(path, out _);
             return true;
         }
 
+        // Lỗi VĨNH VIỄN (ảnh bị từ chối: 400/409/413/415/422, hoặc file hỏng) → dead-letter NGAY.
+        if (result.Outcome == ForwardOutcome.PermanentError)
+        {
+            var prior = _attempts.TryGetValue(path, out var a) ? a : 0;
+            _logger.LogError("Forward lỗi vĩnh viễn (ảnh bị từ chối) → dead-letter ngay: {Path} — {Detail}", path, result.Detail);
+            _spool.MoveToFailed(path, "Permanent", prior, result.Detail);
+            _attempts.TryRemove(path, out _);
+            return false;
+        }
+
+        // Lỗi HẠ TẦNG tạm thời: KHÔNG dead-letter sớm — chỉ chuyển failed khi vượt cap an toàn rất
+        // cao (maxRetries) để sự cố PACS/RIS/mạng thoáng qua không làm mất ảnh.
         var n = _attempts.AddOrUpdate(path, 1, (_, v) => v + 1);
         if (n >= maxRetries)
         {
-            _logger.LogError("Forward thất bại {N} lần → dead-letter: {Path}", n, path);
-            _spool.MoveToFailed(path);
+            _logger.LogError("Forward lỗi hạ tầng {N} lần (vượt cap an toàn {Max}) → dead-letter: {Path} — {Detail}", n, maxRetries, path, result.Detail);
+            _spool.MoveToFailed(path, "Retryable", n, result.Detail);
             _attempts.TryRemove(path, out _);
         }
         else
         {
-            _logger.LogWarning("Forward thất bại lần {N}/{Max}, sẽ thử lại vòng sau: {Path}", n, maxRetries, path);
+            _logger.LogWarning("Forward lỗi hạ tầng lần {N}/{Max}, sẽ thử lại vòng sau (PACS/RIS tạm lỗi?): {Path} — {Detail}", n, maxRetries, path, result.Detail);
         }
         return false;
     }

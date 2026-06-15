@@ -14,14 +14,36 @@ namespace Medisync.RisLocalGateway.Dicom;
 
 /// <summary>
 /// Forward 1 instance DICOM tới PACS qua STOW-RS (đi qua dicomweb-proxy):
-///   1) (tuỳ chọn) transcode sang JPEG 2000 Lossless nếu ảnh đang uncompressed,
+///   1) (tuỳ chọn) transcode ảnh uncompressed → JPEG-LS Lossless (mặc định, decode nhanh);
+///      RIÊNG modality ảnh lớn (MG=mammo/DBT, SM=pathology) → HTJ2K Lossless RPCL (progressive),
 ///   2) STOW multipart/related kèm Bearer token của gateway — dicomweb-proxy verify
 ///      token (iss=HIS, aud=LOCAL-GATEWAY-SERVER) rồi tự gắn label tenant cho study.
-/// Cấu hình tại GatewayConfig.Pacs (StowUrl + Compression).
+/// Cấu hình tại GatewayConfig.Pacs (StowUrl + Compression + CompressionCodec + Htj2kModalities).
 /// </summary>
+/// <summary>
+/// Kết quả forward 1 instance — để SpoolForwarder quyết định dead-letter ĐÚNG loại lỗi:
+///   • Success         → xoá khỏi spool.
+///   • RetryableError  → lỗi HẠ TẦNG tạm thời (PACS/RIS/mạng down, thiếu token, 401/403/timeout/5xx).
+///                       KHÔNG dead-letter sớm; thử lại tới cap an toàn rất cao (Pacs.MaxRetries).
+///   • PermanentError  → ảnh bị từ chối VĨNH VIỄN (HTTP 400/409/413/415/422) hoặc file hỏng.
+///                       Dead-letter NGAY vì thử lại vô ích.
+/// </summary>
+public enum ForwardOutcome { Success, RetryableError, PermanentError }
+
+/// <summary>
+/// Kết quả forward kèm CHI TIẾT lỗi (để ghi sidecar lý do dead-letter). Detail là chuỗi ngắn
+/// human-readable: "HTTP 400 …", "STOW timeout 120s", "exception …"; null khi Success.
+/// </summary>
+public readonly record struct ForwardResult(ForwardOutcome Outcome, string? Detail)
+{
+    public static readonly ForwardResult Ok = new(ForwardOutcome.Success, null);
+    public static ForwardResult Retryable(string detail) => new(ForwardOutcome.RetryableError, detail);
+    public static ForwardResult Permanent(string detail) => new(ForwardOutcome.PermanentError, detail);
+}
+
 public interface IPacsStowClient
 {
-    Task<bool> ForwardAsync(DicomFile file, CancellationToken ct = default);
+    Task<ForwardResult> ForwardAsync(DicomFile file, CancellationToken ct = default);
 }
 
 public sealed class PacsStowClient : IPacsStowClient, IDisposable
@@ -41,13 +63,14 @@ public sealed class PacsStowClient : IPacsStowClient, IDisposable
         _http = new HttpClient { Timeout = Timeout.InfiniteTimeSpan };
     }
 
-    public async Task<bool> ForwardAsync(DicomFile file, CancellationToken ct = default)
+    public async Task<ForwardResult> ForwardAsync(DicomFile file, CancellationToken ct = default)
     {
         var pacs = _configStore.Load().Pacs;
         if (string.IsNullOrWhiteSpace(pacs.StowUrl))
         {
+            // Config chưa sẵn (admin sẽ điền) — coi là tạm thời để KHÔNG dead-letter mất ảnh.
             _logger.LogError("PACS chưa cấu hình (Pacs.StowUrl rỗng) — không forward được");
-            return false;
+            return ForwardResult.Retryable("PACS chưa cấu hình (Pacs.StowUrl rỗng)");
         }
 
         var sop = file.Dataset.GetSingleValueOrDefault(DicomTag.SOPInstanceUID, "(none)");
@@ -57,8 +80,9 @@ public sealed class PacsStowClient : IPacsStowClient, IDisposable
         cts.CancelAfter(TimeSpan.FromSeconds(timeoutSec));
         var sendCt = cts.Token;
 
-        // 1) Transcode JPEG 2000 Lossless nếu bật (luôn chỉ nén ảnh đang uncompressed).
-        var toSend = MaybeCompress(file, pacs.CompressionEnabled, sop);
+        // 1) Transcode nếu bật (luôn chỉ nén ảnh đang uncompressed): JPEG-LS mặc định,
+        //    modality ảnh lớn → HTJ2K RPCL.
+        var toSend = MaybeCompress(file, pacs, sop);
 
         // 2) Serialize DICOM → bytes.
         byte[] bytes;
@@ -70,8 +94,9 @@ public sealed class PacsStowClient : IPacsStowClient, IDisposable
         }
         catch (Exception ex)
         {
+            // Serialize bản gốc lỗi = file hỏng → thử lại vô ích.
             _logger.LogError(ex, "Serialize DICOM lỗi sop={Sop}", sop);
-            return false;
+            return ForwardResult.Permanent("Serialize DICOM lỗi: " + ex.Message);
         }
 
         // 3) Token gateway (cùng token gọi RIS — mang companyUuid/facilityUuid cho proxy label).
@@ -108,53 +133,93 @@ public sealed class PacsStowClient : IPacsStowClient, IDisposable
             {
                 _logger.LogInformation("STOW ← {Code} ({Ms}ms) sop={Sop} {Size}B ts={Ts}",
                     code, sw.ElapsedMilliseconds, sop, bytes.Length, toSend.Dataset.InternalTransferSyntax.UID.Name);
-                return true;
+                return ForwardResult.Ok;
             }
 
             var body = await resp.Content.ReadAsStringAsync(sendCt).ConfigureAwait(false);
-            _logger.LogError("STOW ← {Code} {Reason} ({Ms}ms) sop={Sop} — {Body}",
-                code, resp.ReasonPhrase, sw.ElapsedMilliseconds, sop, Truncate(body, 500));
-            return false;
+            var outcome = ClassifyFailure(code);
+            var detail = $"HTTP {code} {resp.ReasonPhrase}: {Truncate(body, 300)}";
+            _logger.LogError("STOW ← {Code} {Reason} ({Ms}ms) sop={Sop} [{Outcome}] — {Body}",
+                code, resp.ReasonPhrase, sw.ElapsedMilliseconds, sop, outcome, Truncate(body, 500));
+            return new ForwardResult(outcome, detail);
         }
         catch (OperationCanceledException) when (cts.IsCancellationRequested && !ct.IsCancellationRequested)
         {
+            // Timeout STOW (PACS/mạng chậm) = tạm thời → thử lại.
             _logger.LogError("STOW timeout ({Sec}s) sop={Sop} → {Url}", timeoutSec, sop, pacs.StowUrl);
-            return false;
+            return ForwardResult.Retryable($"STOW timeout {timeoutSec}s");
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw; // shutdown thật — để caller dừng vòng quét.
         }
         catch (Exception ex)
         {
+            // Lỗi mạng/socket/HTTP = tạm thời → thử lại, không mất ảnh.
             _logger.LogError(ex, "STOW exception sop={Sop} → {Url}", sop, pacs.StowUrl);
-            return false;
+            return ForwardResult.Retryable("STOW exception: " + ex.Message);
         }
     }
 
-    /// <summary>Transcode sang JPEG 2000 Lossless nếu bật + ảnh đang uncompressed.</summary>
-    private DicomFile MaybeCompress(DicomFile file, bool enabled, string sop)
+    /// <summary>
+    /// Phân loại HTTP code lỗi → outcome. Chỉ các mã "ảnh bị từ chối vĩnh viễn" (request/content
+    /// sai, gửi lại vô ích) mới PermanentError; mọi mã còn lại (401/403/408/429/5xx + mã lạ) coi là
+    /// tạm thời để ƯU TIÊN GIỮ ẢNH — thà thử lại nhiều còn hơn dead-letter oan khi PACS/RIS chợt lỗi.
+    /// </summary>
+    private static ForwardOutcome ClassifyFailure(int code) => code switch
     {
-        if (!enabled) return file;
+        400 or 409 or 413 or 415 or 422 => ForwardOutcome.PermanentError,
+        _                               => ForwardOutcome.RetryableError,
+    };
+
+    /// <summary>
+    /// Transcode ảnh uncompressed sang codec đích nếu bật. Quy tắc:
+    ///   • Modality ∈ Pacs.Htj2kModalities (mặc định MG, SM) → HTJ2K Lossless RPCL (progressive,
+    ///     hợp ảnh rất lớn: mammo/DBT/pathology).
+    ///   • Còn lại → Pacs.CompressionCodec (mặc định JPEG-LS Lossless — decode nhanh).
+    /// Ảnh đã nén (encapsulated) → giữ nguyên, không re-encode. Lỗi transcode → forward bản gốc.
+    /// </summary>
+    private DicomFile MaybeCompress(DicomFile file, PacsConfig pacs, string sop)
+    {
+        if (!pacs.CompressionEnabled) return file;
 
         var current = file.Dataset.InternalTransferSyntax;
-        if (current.IsEncapsulated) // đã nén (kể cả JPEG 2000) → giữ nguyên, chỉ nén ảnh uncompressed
+        if (current.IsEncapsulated) // đã nén (kể cả JPEG 2000/JPEG-LS) → giữ nguyên
         {
             _logger.LogDebug("sop={Sop} đã nén ({Cur}) — giữ nguyên", sop, current.UID.Name);
             return file;
         }
 
-        var target = DicomTransferSyntax.JPEG2000Lossless;
+        var modality = file.Dataset.GetSingleValueOrDefault(DicomTag.Modality, string.Empty);
+        var useHtj2k = !string.IsNullOrEmpty(modality)
+            && pacs.Htj2kModalities is { Length: > 0 }
+            && Array.Exists(pacs.Htj2kModalities, m => string.Equals(m, modality, StringComparison.OrdinalIgnoreCase));
+        var target = useHtj2k ? DicomTransferSyntax.HTJ2KLosslessRPCL : CodecToTs(pacs.CompressionCodec);
+
         try
         {
             var transcoded = new DicomTranscoder(current, target).Transcode(file);
-            _logger.LogDebug("Transcode sop={Sop}: {From} → JPEG2000Lossless", sop, current.UID.Name);
+            _logger.LogDebug("Transcode sop={Sop} mod={Mod}: {From} → {To}",
+                sop, modality, current.UID.Name, target.UID.Name);
             return transcoded;
         }
         catch (Exception ex)
         {
             // Lossless transcode lỗi (vd thiếu codec native) → forward bản gốc, không mất ảnh.
-            _logger.LogWarning(ex, "Transcode sop={Sop} {From} → JPEG2000Lossless lỗi — forward bản gốc",
-                sop, current.UID.Name);
+            _logger.LogWarning(ex, "Transcode sop={Sop} {From} → {To} lỗi — forward bản gốc",
+                sop, current.UID.Name, target.UID.Name);
             return file;
         }
     }
+
+    /// <summary>Map tên codec (config) → transfer syntax. Mặc định JPEG-LS Lossless.</summary>
+    private static DicomTransferSyntax CodecToTs(string? codec) => (codec ?? string.Empty).Trim().ToUpperInvariant() switch
+    {
+        "JPEG2000" or "J2K"          => DicomTransferSyntax.JPEG2000Lossless,
+        "HTJ2K"                      => DicomTransferSyntax.HTJ2KLossless,
+        "HTJ2KRPCL" or "HTJ2K-RPCL"  => DicomTransferSyntax.HTJ2KLosslessRPCL,
+        _                            => DicomTransferSyntax.JPEGLSLossless,
+    };
 
     private static string Truncate(string s, int max)
         => string.IsNullOrEmpty(s) ? string.Empty : (s.Length <= max ? s : s.Substring(0, max) + "…");

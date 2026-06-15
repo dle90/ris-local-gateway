@@ -1,8 +1,10 @@
 using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
+using System.Diagnostics.CodeAnalysis;
 using System.IO;
 using System.Linq;
+using System.Text.Json;
 using System.Threading.Tasks;
 using FellowOakDicom;
 using Medisync.RisLocalGateway.Core.Configuration;
@@ -24,10 +26,12 @@ public sealed class SpoolStore
 {
     private const string NoSeries = "(no-series)";
     private static readonly TimeSpan PrimeTtl = TimeSpan.FromMinutes(30);
+    private static readonly JsonSerializerOptions FailureJsonOptions = new() { WriteIndented = true };
 
     private readonly ILogger<SpoolStore> _logger;
-    private readonly string _spoolDir;
-    private readonly string _failedDir;
+    private string _spoolDir;
+    private string _failedDir;
+    private string _failedReasonDir;
 
     // In-memory (mất khi restart — chấp nhận, dựng lại lazily):
     private readonly ConcurrentDictionary<string, string> _index = new();          // path -> seriesUid
@@ -37,15 +41,47 @@ public sealed class SpoolStore
     public SpoolStore(ConfigStore configStore, ILogger<SpoolStore> logger)
     {
         _logger = logger;
-        var storage = configStore.Load().Dicom.StorageDirectory;
-        var root = string.IsNullOrWhiteSpace(storage)
+        ApplyStorage(configStore.Load().Dicom.StorageDirectory);
+    }
+
+    private static string ResolveSpoolRoot(string? storageDirectory) =>
+        string.IsNullOrWhiteSpace(storageDirectory)
             ? Path.Combine(ConfigPaths.BaseDirectory, "spool")
-            : Path.Combine(storage, "spool");
+            : Path.Combine(storageDirectory, "spool");
+
+    [MemberNotNull(nameof(_spoolDir), nameof(_failedDir), nameof(_failedReasonDir))]
+    private void ApplyStorage(string? storageDirectory)
+    {
+        var root = ResolveSpoolRoot(storageDirectory);
         _spoolDir = root;
         _failedDir = Path.Combine(root, "failed");
+        _failedReasonDir = Path.Combine(root, "failed-reasons");
         Directory.CreateDirectory(_spoolDir);
         Directory.CreateDirectory(_failedDir);
-        _logger.LogInformation("Spool dir: {Dir}", _spoolDir);
+        Directory.CreateDirectory(_failedReasonDir);
+        _logger.LogInformation("Spool dir: {Dir} (failed: {Failed}, reasons: {Reasons})",
+            _spoolDir, _failedDir, _failedReasonDir);
+    }
+
+    /// <summary>
+    /// Đổi thư mục spool khi config (Dicom.StorageDirectory) thay đổi lúc đang chạy — vì SpoolStore
+    /// là singleton, đọc dir 1 lần lúc khởi tạo. File ĐANG nằm ở dir CŨ sẽ KHÔNG tự di chuyển
+    /// (forwarder chỉ quét dir mới) → cảnh báo để admin tự copy/drain dir cũ nếu còn file.
+    /// </summary>
+    public void Reconfigure(string? storageDirectory)
+    {
+        var newRoot = ResolveSpoolRoot(storageDirectory);
+        if (string.Equals(newRoot, _spoolDir, StringComparison.OrdinalIgnoreCase)) return;
+
+        var old = _spoolDir;
+        var leftover = 0;
+        try { leftover = Directory.GetFiles(old, "*.dcm", SearchOption.TopDirectoryOnly).Length; }
+        catch { /* dir cũ có thể đã bị xoá — bỏ qua */ }
+
+        ApplyStorage(storageDirectory);
+        _logger.LogWarning(
+            "StorageDirectory đổi: spool {Old} → {New}. {N} file còn ở dir CŨ sẽ KHÔNG tự forward — " +
+            "copy thủ công sang dir mới nếu cần.", old, _spoolDir, leftover);
     }
 
     // ---------- Disk + enqueue ----------
@@ -118,17 +154,47 @@ public sealed class SpoolStore
         catch (Exception ex) { _logger.LogWarning(ex, "Xoá spool file lỗi: {Path}", path); }
     }
 
-    /// <summary>Dead-letter: chuyển sang spool/failed + dọn state.</summary>
-    public void MoveToFailed(string path)
+    /// <summary>
+    /// Dead-letter: chuyển .dcm sang spool/failed + ghi sidecar lý do fail sang spool/failed-reasons
+    /// (folder RIÊNG, không lẫn .dcm) + dọn state.
+    /// </summary>
+    public void MoveToFailed(string path, string category, int attempts, string? reason)
     {
+        var series = SeriesOf(path); // lấy series TRƯỚC khi OnRemoved xoá index
         OnRemoved(path);
         try
         {
-            var dest = Path.Combine(_failedDir, Path.GetFileName(path));
+            var fileName = Path.GetFileName(path);
+            var dest = Path.Combine(_failedDir, fileName);
             File.Move(path, dest, overwrite: true);
-            _logger.LogError("Spool → FAILED (dead-letter): {Dest}", dest);
+            WriteFailureSidecar(fileName, category, attempts, reason, series);
+            _logger.LogError("Spool → FAILED (dead-letter) [{Category}]: {Dest}", category, dest);
         }
         catch (Exception ex) { _logger.LogWarning(ex, "Move to failed lỗi: {Path}", path); }
+    }
+
+    /// <summary>Ghi lý do dead-letter ra spool/failed-reasons/&lt;sop&gt;.error.json (tách khỏi file .dcm).</summary>
+    private void WriteFailureSidecar(string failedFileName, string category, int attempts, string? reason, string? series)
+    {
+        try
+        {
+            var baseName = Path.GetFileNameWithoutExtension(failedFileName);
+            var sidecar = Path.Combine(_failedReasonDir, baseName + ".error.json");
+            var info = new
+            {
+                file = failedFileName,
+                category,
+                attempts,
+                series,
+                reason = reason ?? string.Empty,
+                failedAtUtc = DateTimeOffset.UtcNow.ToString("o"),
+            };
+            File.WriteAllText(sidecar, JsonSerializer.Serialize(info, FailureJsonOptions));
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Ghi sidecar lý do fail lỗi cho {File}", failedFileName);
+        }
     }
 
     /// <summary>Bỏ index của path; trừ pendingCount; về 0 thì dọn sạch state series (cửa cleanup chính).</summary>
