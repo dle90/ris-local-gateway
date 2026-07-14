@@ -18,6 +18,9 @@ public static class ConfigPaths
 
     public static string LogDirectory => Path.Combine(BaseDirectory, "logs");
 
+    /// <summary>Thư mục chứa DB thống kê study local (SQLite) — cố định, không theo StorageDirectory.</summary>
+    public static string StatsDirectory => Path.Combine(BaseDirectory, "stats");
+
     public static void EnsureDirectories()
     {
         Directory.CreateDirectory(BaseDirectory);

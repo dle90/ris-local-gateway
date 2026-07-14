@@ -48,6 +48,15 @@ public interface IRisClient
         CancellationToken ct = default);
 
     /// <summary>
+    /// POST /v1/lgs/local-gateway-server/actions/receive-study-info
+    /// Gửi snapshot study + bộ phận chụp (gọi PER SERIES sau khi forward ảnh). HIS: study có
+    /// trong worklist → merge body part; không có → lưu/upsert orphan study. Idempotent.
+    /// </summary>
+    Task<RisResponse> NotifyReceiveStudyInfoAsync(
+        LgsReceiveStudyInfoRequest request,
+        CancellationToken ct = default);
+
+    /// <summary>
     /// Access token Bearer hiện hành của gateway (đăng nhập ITG-LGS). Dùng cho STOW
     /// tới PACS: token mang iss=HIS, aud=LOCAL-GATEWAY-SERVER, companyUuid, facilityUuid
     /// nên dicomweb-proxy verify được và tự gắn label tenant cho study.

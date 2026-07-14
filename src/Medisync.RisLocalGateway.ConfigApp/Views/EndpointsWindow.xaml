@@ -82,6 +82,12 @@
                 <TextBox Text="{Binding MppsDiscontinued, UpdateSourceTrigger=PropertyChanged}"
                          FontFamily="Consolas, Courier New" />
 
+                <TextBlock Text="Nhận thông tin study (Receive Study Info)" FontWeight="SemiBold" Margin="0,16,0,2" />
+                <TextBlock Text="POST — gửi snapshot study (bệnh nhân + bộ phận chụp) per series khi forward lên PACS. HIS bổ sung body_parts hoặc lưu orphan study nếu study không có trong worklist."
+                           Foreground="#6B7280" FontSize="11" Margin="0,0,0,4" TextWrapping="Wrap" />
+                <TextBox Text="{Binding ReceiveStudyInfo, UpdateSourceTrigger=PropertyChanged}"
+                         FontFamily="Consolas, Courier New" />
+
                 <Border Background="#FEF3C7" BorderBrush="#FCD34D" BorderThickness="1"
                         CornerRadius="4" Padding="12,8" Margin="0,20,0,0">
                     <StackPanel>

@@ -1,9 +1,9 @@
 using System.Net.Http;
 using System.Net.Http.Json;
-using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using Medisync.RisLocalGateway.Core.Ris.Models;
+using Medisync.RisLocalGateway.Core.Utils;
 
 namespace Medisync.RisLocalGateway.Core.Ris;
 
@@ -37,7 +37,7 @@ public static class RisAuth
         if (code == 200)
         {
             // Auth endpoint trả raw SignInResponse, KHÔNG wrap qua RisBaseResponse.
-            var signIn = TryDeserialize<SignInResponse>(body);
+            var signIn = JsonUtil.TryDeserialize<SignInResponse>(body);
             if (signIn is null)
                 return RisResponse<SignInResponse>.Failure(code, "HTTP 200 nhưng response không phải JSON chuẩn (SignInResponse)");
             if (string.IsNullOrEmpty(signIn.AccessToken))
@@ -45,14 +45,7 @@ public static class RisAuth
             return RisResponse<SignInResponse>.Success(signIn, code);
         }
 
-        var err = TryDeserialize<RisErrorResponse>(body);
+        var err = JsonUtil.TryDeserialize<RisErrorResponse>(body);
         return RisResponse<SignInResponse>.Failure(code, err?.Message ?? $"HTTP {code} {resp.ReasonPhrase}");
-    }
-
-    private static T? TryDeserialize<T>(string body) where T : class
-    {
-        if (string.IsNullOrWhiteSpace(body)) return null;
-        try { return JsonSerializer.Deserialize<T>(body); }
-        catch { return null; }
     }
 }

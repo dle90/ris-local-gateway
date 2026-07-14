@@ -109,5 +109,5 @@ Logic DICOM ở [src/Medisync.RisLocalGateway.Dicom/RisGatewayDicomProvider.cs](
 Dùng **fo-dicom DicomEchoTest** hoặc **dcm4che storescu** từ máy khác:
 ```pwsh
 # C-ECHO test (cần fo-dicom CLI hoặc DCMTK)
-echoscu -aet TEST_SCU -aec RIS_GW <gateway-ip> 11112
+echoscu -aet TEST_SCU -aec RIS_GW <gateway-ip> 4646
 ```

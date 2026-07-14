@@ -13,9 +13,16 @@
     <PackageReference Include="CommunityToolkit.Mvvm" Version="8.3.2" />
     <PackageReference Include="System.ServiceProcess.ServiceController" Version="8.0.1" />
     <PackageReference Include="Serilog" Version="4.1.0" />
+    <!-- Bridge Serilog → Microsoft ILogger cho StudyStatsStore (thống kê study local) -->
+    <PackageReference Include="Serilog.Extensions.Logging" Version="8.0.0" />
     <PackageReference Include="Serilog.Sinks.File" Version="6.0.0" />
+    <!-- Native DICOM codecs — để re-drive dead-letter transcode (JPEG-LS...) giống Service.
+         Cùng version với Service; type NativeTranscoderManager đăng ký ở App.xaml.cs. -->
+    <PackageReference Include="fo-dicom.Codecs" Version="5.16.5.1" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\Medisync.RisLocalGateway.Core\Medisync.RisLocalGateway.Core.csproj" />
+    <!-- Dicom: re-drive dead-letter tái dùng PacsStowClient (transcode + STOW + phân loại lỗi) -->
+    <ProjectReference Include="..\Medisync.RisLocalGateway.Dicom\Medisync.RisLocalGateway.Dicom.csproj" />
   </ItemGroup>
 </Project>

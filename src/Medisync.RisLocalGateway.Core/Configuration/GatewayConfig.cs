@@ -8,11 +8,13 @@ public sealed class GatewayConfig
 
     public PacsConfig Pacs { get; set; } = new();
 
+    // Default lấy theo bộ giá trị đang chạy thật (trừ: tài khoản RIS để trống — nhập qua
+    // ConfigApp; StorageDirectory để trống → spool fallback về %ProgramData%).
     public static GatewayConfig CreateDefault() => new()
     {
         Ris = new RisConfig
         {
-            BaseUrl = "https://ris.example.com",
+            BaseUrl = "https://his-core-production.up.railway.app",
             Username = string.Empty,
             ProtectedPassword = string.Empty,
             Endpoints = RisEndpoints.CreateDefault(),
@@ -20,15 +22,15 @@ public sealed class GatewayConfig
         Dicom = new DicomConfig
         {
             AeTitle = "RIS_GW",
-            Port = 11112,
+            Port = 4646,
             StorageDirectory = string.Empty,
         },
         Pacs = new PacsConfig
         {
-            StowUrl = "http://localhost:8080/wado/studies",
+            StowUrl = "https://pacs-dicomweb-proxy-production.up.railway.app/wado/studies",
             TimeoutSeconds = 120,
-            ScanIntervalSeconds = 15,
-            MaxRetries = 1000,
+            ScanIntervalSeconds = 5,
+            MaxRetries = 50,
             MaxParallelForwards = 4,
             CompressionEnabled = true,
             CompressionCodec = "JPEGLS",
@@ -57,21 +59,24 @@ public sealed class RisEndpoints
     public string MppsInProgress { get; set; } = string.Empty;
     public string MppsCompleted { get; set; } = string.Empty;
     public string MppsDiscontinued { get; set; } = string.Empty;
+    public string ReceiveStudyInfo { get; set; } = string.Empty;
 
+    // Path đi qua API gateway (prefix /services/his-core) — khớp môi trường đang chạy thật.
     public static RisEndpoints CreateDefault() => new()
     {
-        SignIn           = "/v1/integration/auth/token",
-        WorkList         = "/v1/lgs/local-gateway-server/actions/get-work-list",
-        MppsInProgress   = "/v1/lgs/local-gateway-server/actions/mpps-in-progress",
-        MppsCompleted    = "/v1/lgs/local-gateway-server/actions/mpps-completed",
-        MppsDiscontinued = "/v1/lgs/local-gateway-server/actions/mpps-discontinued",
+        SignIn           = "/services/his-core/v1/integration/auth/token",
+        WorkList         = "/services/his-core/v1/lgs/local-gateway-server/actions/get-work-list",
+        MppsInProgress   = "/services/his-core/v1/lgs/local-gateway-server/actions/mpps-in-progress",
+        MppsCompleted    = "/services/his-core/v1/lgs/local-gateway-server/actions/mpps-completed",
+        MppsDiscontinued = "/services/his-core/v1/lgs/local-gateway-server/actions/mpps-discontinued",
+        ReceiveStudyInfo = "/services/his-core/v1/lgs/local-gateway-server/actions/receive-study-info",
     };
 }
 
 public sealed class DicomConfig
 {
     public string AeTitle { get; set; } = "RIS_GW";
-    public int Port { get; set; } = 11112;
+    public int Port { get; set; } = 4646;
     public string StorageDirectory { get; set; } = string.Empty;
 }
 

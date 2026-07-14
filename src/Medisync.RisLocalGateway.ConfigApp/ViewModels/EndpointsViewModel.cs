@@ -22,6 +22,7 @@ public partial class EndpointsViewModel : ObservableObject
     [ObservableProperty] private string _mppsInProgress = string.Empty;
     [ObservableProperty] private string _mppsCompleted = string.Empty;
     [ObservableProperty] private string _mppsDiscontinued = string.Empty;
+    [ObservableProperty] private string _receiveStudyInfo = string.Empty;
 
     [ObservableProperty] private string _status = string.Empty;
     [ObservableProperty] private Brush _statusColor = Brushes.Black;
@@ -39,6 +40,7 @@ public partial class EndpointsViewModel : ObservableObject
             MppsInProgress = ep.MppsInProgress;
             MppsCompleted = ep.MppsCompleted;
             MppsDiscontinued = ep.MppsDiscontinued;
+            ReceiveStudyInfo = ep.ReceiveStudyInfo;
             SetStatus("Đã tải endpoint.", ok: true);
         }
         catch (Exception ex)
@@ -60,8 +62,9 @@ public partial class EndpointsViewModel : ObservableObject
             var normalizedUrl = UrlHelper.NormalizeBaseUrl(BaseUrl.Trim());
             if (normalizedUrl != BaseUrl) BaseUrl = normalizedUrl;
 
-            // Mutate cfg.Ris IN-PLACE → giữ nguyên Username/ProtectedPassword (đặt ở window tài khoản).
-            var cfg = _store.Load();
+            // LoadCopy (KHÔNG mutate cache dùng chung) + chỉ sửa field của window này
+            // → giữ nguyên Username/ProtectedPassword (đặt ở window tài khoản).
+            var cfg = _store.LoadCopy();
             cfg.Ris.BaseUrl = normalizedUrl;
             cfg.Ris.Endpoints = new RisEndpoints
             {
@@ -70,6 +73,7 @@ public partial class EndpointsViewModel : ObservableObject
                 MppsInProgress = MppsInProgress?.Trim() ?? string.Empty,
                 MppsCompleted = MppsCompleted?.Trim() ?? string.Empty,
                 MppsDiscontinued = MppsDiscontinued?.Trim() ?? string.Empty,
+                ReceiveStudyInfo = ReceiveStudyInfo?.Trim() ?? string.Empty,
             };
             _store.Save(cfg);
             SetStatus("Đã lưu Base URL + endpoint. Service sẽ tự nạp lại.", ok: true);
@@ -90,6 +94,7 @@ public partial class EndpointsViewModel : ObservableObject
         MppsInProgress = def.MppsInProgress;
         MppsCompleted = def.MppsCompleted;
         MppsDiscontinued = def.MppsDiscontinued;
+        ReceiveStudyInfo = def.ReceiveStudyInfo;
         SetStatus("Đã reset về giá trị mặc định (chưa lưu — bấm Lưu để áp dụng).", ok: true);
     }
 

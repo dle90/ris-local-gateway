@@ -54,11 +54,19 @@ try
     builder.Logging.AddSerilog(Log.Logger, dispose: true);
 
     builder.Services.AddSingleton<ConfigStore>();
-    builder.Services.AddSingleton(new HttpClient { Timeout = TimeSpan.FromSeconds(30) });
+    // PooledConnectionLifetime: service chạy 24/7, HttpClient mặc định giữ connection vĩnh viễn
+    // → RIS đổi IP (failover/đổi hạ tầng) là kẹt IP cũ tới khi restart. Recycle 5' để re-resolve DNS.
+    builder.Services.AddSingleton(new HttpClient(new SocketsHttpHandler
+    {
+        PooledConnectionLifetime = TimeSpan.FromMinutes(5),
+    })
+    { Timeout = TimeSpan.FromSeconds(30) });
     builder.Services.AddSingleton<IRisClient, HttpRisClient>();
     builder.Services.AddSingleton<Medisync.RisLocalGateway.Dicom.IPacsStowClient,
                                   Medisync.RisLocalGateway.Dicom.PacsStowClient>();
     builder.Services.AddSingleton<Medisync.RisLocalGateway.Dicom.SpoolStore>();
+    // Thống kê study local (SQLite) — best-effort, init lỗi thì tự tắt, không ảnh hưởng pipeline.
+    builder.Services.AddSingleton<Medisync.RisLocalGateway.Dicom.Stats.StudyStatsStore>();
     builder.Services.AddSingleton<Medisync.RisLocalGateway.Dicom.DicomServerHost>();
     builder.Services.AddHostedService<GatewayWorker>();
     builder.Services.AddHostedService<SpoolForwarder>();
@@ -71,6 +79,8 @@ try
         host.Services.GetRequiredService<IRisClient>();
     Medisync.RisLocalGateway.Dicom.RisGatewayDicomProvider.Spool =
         host.Services.GetRequiredService<Medisync.RisLocalGateway.Dicom.SpoolStore>();
+    Medisync.RisLocalGateway.Dicom.RisGatewayDicomProvider.Stats =
+        host.Services.GetRequiredService<Medisync.RisLocalGateway.Dicom.Stats.StudyStatsStore>();
 
     host.Run();
 }

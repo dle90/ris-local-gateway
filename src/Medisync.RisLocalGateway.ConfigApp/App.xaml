@@ -24,6 +24,88 @@
             <Setter Property="Margin" Value="0,0,8,0" />
         </Style>
 
+        <!-- Ngày trong lịch popup: bo góc, hover xanh nhạt, hôm nay xanh dương đậm, chọn = nền xanh đặc -->
+        <Style x:Key="ModernCalendarDayButtonStyle" TargetType="CalendarDayButton">
+            <Setter Property="MinWidth" Value="34" />
+            <Setter Property="MinHeight" Value="32" />
+            <Setter Property="FontSize" Value="13" />
+            <Setter Property="Foreground" Value="#111827" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="CalendarDayButton">
+                        <Border x:Name="Bd" CornerRadius="6" Background="Transparent" Margin="1">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" />
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Bd" Property="Background" Value="#EFF6FF" />
+                            </Trigger>
+                            <Trigger Property="IsInactive" Value="True">
+                                <Setter Property="Foreground" Value="#C4C7CC" />
+                            </Trigger>
+                            <Trigger Property="IsToday" Value="True">
+                                <Setter Property="Foreground" Value="#1D4ED8" />
+                                <Setter Property="FontWeight" Value="Bold" />
+                                <Setter TargetName="Bd" Property="Background" Value="#EFF6FF" />
+                            </Trigger>
+                            <Trigger Property="IsSelected" Value="True">
+                                <Setter TargetName="Bd" Property="Background" Value="#2563EB" />
+                                <Setter Property="Foreground" Value="White" />
+                                <Setter Property="FontWeight" Value="SemiBold" />
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <Style x:Key="ModernCalendarStyle" TargetType="Calendar">
+            <Setter Property="Background" Value="White" />
+            <Setter Property="BorderBrush" Value="#E5E7EB" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="CalendarDayButtonStyle" Value="{StaticResource ModernCalendarDayButtonStyle}" />
+        </Style>
+
+        <!-- Hộp bấm chọn ngày (thay WPF DatePicker vì control đó render ô ngày lỗi trên máy này):
+             ToggleButton hiện ngày (ContentPresenter) + icon lịch tách ô phải; bấm mở Popup lịch.
+             Ngày hiển thị bằng TextBlock bind thẳng (đặt ở Content mỗi instance) nên KHÔNG dính bug. -->
+        <Style x:Key="DateFilterToggleStyle" TargetType="ToggleButton">
+            <Setter Property="Height" Value="32" />
+            <Setter Property="Width" Value="150" />
+            <Setter Property="Background" Value="White" />
+            <Setter Property="Cursor" Value="Hand" />
+            <Setter Property="HorizontalContentAlignment" Value="Left" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="ToggleButton">
+                        <Border x:Name="Bd" Background="{TemplateBinding Background}"
+                                BorderBrush="#D1D5DB" BorderThickness="1" CornerRadius="4">
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+                                <ContentPresenter Grid.Column="0" VerticalAlignment="Center" Margin="10,0" />
+                                <Border Grid.Column="1" BorderBrush="#E5E7EB" BorderThickness="1,0,0,0">
+                                    <TextBlock Text="&#xE787;" FontFamily="Segoe MDL2 Assets" FontSize="15"
+                                               Foreground="#6B7280" Width="32"
+                                               TextAlignment="Center" VerticalAlignment="Center" />
+                                </Border>
+                            </Grid>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Bd" Property="BorderBrush" Value="#3B82F6" />
+                            </Trigger>
+                            <Trigger Property="IsChecked" Value="True">
+                                <Setter TargetName="Bd" Property="BorderBrush" Value="#2563EB" />
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
         <!-- Button có template tự custom: disabled state hiện rõ chữ đậm trên nền xám -->
         <Style x:Key="ActionButtonStyle" TargetType="Button">
             <Setter Property="MinWidth" Value="100" />

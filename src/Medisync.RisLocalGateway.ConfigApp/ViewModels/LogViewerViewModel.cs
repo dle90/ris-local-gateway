@@ -30,6 +30,17 @@ public partial class LogViewerViewModel : ObservableObject
     [ObservableProperty] private bool _showError = true;
     [ObservableProperty] private bool _autoScroll = true;
 
+    // Nguồn log: true = Service (gateway-*.log), false = ConfigApp (configapp-*.log —
+    // chứa log của tính năng đẩy lại dead-letter chạy trong tiến trình ConfigApp).
+    [ObservableProperty] private bool _showServiceLog = true;
+
+    partial void OnShowServiceLogChanged(bool value)
+    {
+        Lines.Clear();
+        _tailReader.SetPattern(value ? "gateway-*.log" : "configapp-*.log");
+        PollNewLines();
+    }
+
     public event EventHandler? LinesAppended;
 
     public void PollNewLines()

@@ -35,7 +35,7 @@ public partial class OverviewViewModel : ObservableObject
     [ObservableProperty] private string _dicomListenerText = "—";
     [ObservableProperty] private Brush _dicomListenerColor = Brushes.Gray;
     [ObservableProperty] private string _aeTitle = "RIS_GW";
-    [ObservableProperty] private int _port = 11112;
+    [ObservableProperty] private int _port = 4646;
 
     // Trạng thái listen lần trước — chỉ log ERROR khi CHUYỂN sang fail (tránh spam mỗi 5s).
     private bool? _lastDicomListening;

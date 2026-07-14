@@ -56,8 +56,9 @@ public partial class RisAccountViewModel : ObservableObject
     {
         try
         {
-            // Mutate cfg.Ris IN-PLACE → giữ nguyên BaseUrl + Endpoints (không reset).
-            var cfg = _store.Load();
+            // LoadCopy (KHÔNG mutate cache dùng chung) + chỉ sửa field của window này
+            // → giữ nguyên BaseUrl + Endpoints (không reset).
+            var cfg = _store.LoadCopy();
             cfg.Ris.Username = Username?.Trim() ?? string.Empty;
             cfg.Ris.ProtectedPassword = SecretProtector.Protect(PlainPassword ?? string.Empty);
             _store.Save(cfg);

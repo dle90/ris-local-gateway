@@ -4,11 +4,11 @@ using System.Net;
 using System.Net.Http;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
-using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using Medisync.RisLocalGateway.Core.Configuration;
 using Medisync.RisLocalGateway.Core.Ris.Models;
+using Medisync.RisLocalGateway.Core.Utils;
 using Microsoft.Extensions.Logging;
 
 namespace Medisync.RisLocalGateway.Core.Ris;
@@ -64,8 +64,8 @@ public sealed class HttpRisClient : IRisClient, IDisposable
         var cfg = _configStore.Load();
         var url = CombineUrl(cfg.Ris.BaseUrl, GetEndpoint(cfg, e => e.WorkList));
 
-        return await CallWithAuthAsync<LgsGetWorkListRequest, List<LgsGetWorkListResponse>>(
-            HttpMethod.Post, url, request, cfg, ct);
+        var raw = await SendWithAuthAsync(HttpMethod.Post, url, request, cfg, ct).ConfigureAwait(false);
+        return ParseResult<List<LgsGetWorkListResponse>>(raw, HttpMethod.Post, url);
     }
 
     public async Task<RisResponse> NotifyMppsInProgressAsync(
@@ -74,7 +74,8 @@ public sealed class HttpRisClient : IRisClient, IDisposable
     {
         var cfg = _configStore.Load();
         var url = CombineUrl(cfg.Ris.BaseUrl, GetEndpoint(cfg, e => e.MppsInProgress));
-        return await CallWithAuthVoidAsync(HttpMethod.Post, url, request, cfg, ct);
+        var raw = await SendWithAuthAsync(HttpMethod.Post, url, request, cfg, ct).ConfigureAwait(false);
+        return ParseVoid(raw, HttpMethod.Post, url);
     }
 
     public async Task<RisResponse> NotifyMppsCompletedAsync(
@@ -83,7 +84,8 @@ public sealed class HttpRisClient : IRisClient, IDisposable
     {
         var cfg = _configStore.Load();
         var url = CombineUrl(cfg.Ris.BaseUrl, GetEndpoint(cfg, e => e.MppsCompleted));
-        return await CallWithAuthVoidAsync(HttpMethod.Post, url, request, cfg, ct);
+        var raw = await SendWithAuthAsync(HttpMethod.Post, url, request, cfg, ct).ConfigureAwait(false);
+        return ParseVoid(raw, HttpMethod.Post, url);
     }
 
     public async Task<RisResponse> NotifyMppsDiscontinuedAsync(
@@ -92,7 +94,18 @@ public sealed class HttpRisClient : IRisClient, IDisposable
     {
         var cfg = _configStore.Load();
         var url = CombineUrl(cfg.Ris.BaseUrl, GetEndpoint(cfg, e => e.MppsDiscontinued));
-        return await CallWithAuthVoidAsync(HttpMethod.Post, url, request, cfg, ct);
+        var raw = await SendWithAuthAsync(HttpMethod.Post, url, request, cfg, ct).ConfigureAwait(false);
+        return ParseVoid(raw, HttpMethod.Post, url);
+    }
+
+    public async Task<RisResponse> NotifyReceiveStudyInfoAsync(
+        LgsReceiveStudyInfoRequest request,
+        CancellationToken ct = default)
+    {
+        var cfg = _configStore.Load();
+        var url = CombineUrl(cfg.Ris.BaseUrl, GetEndpoint(cfg, e => e.ReceiveStudyInfo));
+        var raw = await SendWithAuthAsync(HttpMethod.Post, url, request, cfg, ct).ConfigureAwait(false);
+        return ParseVoid(raw, HttpMethod.Post, url);
     }
 
     /// <summary>
@@ -105,49 +118,26 @@ public sealed class HttpRisClient : IRisClient, IDisposable
         return await GetTokenAsync(cfg, ct).ConfigureAwait(false);
     }
 
-    // ============== Core helpers ==============
+    // ============== HTTP core (1 nơi duy nhất gửi + 401-retry) ==============
 
     /// <summary>
-    /// Gọi API có Bearer auth. Nếu 401, login lại 1 lần rồi retry.
+    /// Kết quả HTTP thô sau 1 lần gửi có Bearer. <see cref="Error"/> != null nghĩa là lỗi tầng
+    /// transport (không có HTTP response: mất token / exception mạng) — khi đó <see cref="Code"/> = 0.
     /// </summary>
-    private async Task<RisResponse<TResult>> CallWithAuthAsync<TRequest, TResult>(
-        HttpMethod method,
-        string url,
-        TRequest body,
-        GatewayConfig cfg,
-        CancellationToken ct)
-    {
-        // Attempt 1
-        var result = await CallOnceAsync<TRequest, TResult>(method, url, body, cfg, ct).ConfigureAwait(false);
-        if (result.HttpStatusCode != (int)HttpStatusCode.Unauthorized)
-        {
-            return result;
-        }
+    private readonly record struct RawResult(int Code, string Body, string? Error, long ElapsedMs);
 
-        // 401 — token có thể hết hạn / bị revoke → force refresh + retry 1 lần
-        _logger.LogWarning("Got 401 from {Url}, forcing token refresh and retrying once", url);
-        await ForceRefreshTokenAsync(cfg, ct).ConfigureAwait(false);
-
-        var retry = await CallOnceAsync<TRequest, TResult>(method, url, body, cfg, ct).ConfigureAwait(false);
-        if (retry.HttpStatusCode == (int)HttpStatusCode.Unauthorized)
-        {
-            _logger.LogError("Still 401 after token refresh — credentials có thể sai hoặc bị thu hồi");
-        }
-        return retry;
-    }
-
-    private async Task<RisResponse<TResult>> CallOnceAsync<TRequest, TResult>(
-        HttpMethod method,
-        string url,
-        TRequest body,
-        GatewayConfig cfg,
-        CancellationToken ct)
+    /// <summary>
+    /// Gửi 1 request có Bearer, đọc code + body. KHÔNG parse nghiệp vụ — parse để <see cref="ParseResult"/>
+    /// / <see cref="ParseVoid"/> tuỳ endpoint có/không payload. Gộp về đây để bỏ 2 bản CallOnce trùng.
+    /// </summary>
+    private async Task<RawResult> SendOnceAsync<TRequest>(
+        HttpMethod method, string url, TRequest body, GatewayConfig cfg, CancellationToken ct)
     {
         var token = await GetTokenAsync(cfg, ct).ConfigureAwait(false);
         if (token is null)
         {
             _logger.LogError("RIS call {Method} {Url} aborted: không lấy được access token", method.Method, url);
-            return RisResponse<TResult>.Failure(0, "Không lấy được access token (login thất bại?)");
+            return new RawResult(0, string.Empty, "Không lấy được access token (login thất bại?)", 0);
         }
 
         var sw = System.Diagnostics.Stopwatch.StartNew();
@@ -166,157 +156,112 @@ public sealed class HttpRisClient : IRisClient, IDisposable
             var code = (int)resp.StatusCode;
             var responseBody = await resp.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
 
-            if (code == 200)
-            {
-                var envelope = TryDeserialize<RisBaseResponse<TResult>>(responseBody);
-                if (envelope is null)
-                {
-                    _logger.LogError("RIS call ← {Method} {Url} HTTP 200 ({Ms}ms) nhưng response không phải JSON chuẩn",
-                        method.Method, url, sw.ElapsedMilliseconds);
-                    return RisResponse<TResult>.Failure(code, "Response 200 nhưng không phải JSON chuẩn (RisBaseResponse)");
-                }
-                if (envelope.Result is null)
-                {
-                    _logger.LogWarning("RIS call ← {Method} {Url} HTTP 200 ({Ms}ms) — result null: {Message}",
-                        method.Method, url, sw.ElapsedMilliseconds, envelope.Message);
-                    return RisResponse<TResult>.Failure(code, $"Response 200 nhưng field 'result' null: {envelope.Message}");
-                }
-                _logger.LogInformation("RIS call ← {Method} {Url} HTTP 200 ({Ms}ms) OK",
-                    method.Method, url, sw.ElapsedMilliseconds);
-                return RisResponse<TResult>.Success(envelope.Result, code);
-            }
-
-            if (code == 400)
-            {
-                var err = TryDeserialize<RisErrorResponse>(responseBody);
-                var msg = err?.Message ?? "HTTP 400 (không parse được message)";
-                _logger.LogWarning("RIS call ← {Method} {Url} HTTP 400 ({Ms}ms) — {Message}",
-                    method.Method, url, sw.ElapsedMilliseconds, msg);
-                return RisResponse<TResult>.Failure(code, msg);
-            }
-
-            if (code == (int)HttpStatusCode.Unauthorized)
+            if (code == 401)
             {
                 _logger.LogWarning("RIS call ← {Method} {Url} HTTP 401 ({Ms}ms) — sẽ refresh token + retry",
                     method.Method, url, sw.ElapsedMilliseconds);
-                return RisResponse<TResult>.Failure(code, "HTTP 401 Unauthorized");
+            }
+            else if (code != 200 && code != 400)
+            {
+                // 200 (OK) + 400 (lỗi nghiệp vụ có message) do Parse* log; còn lại log lỗi kèm body ở đây.
+                _logger.LogError("RIS call ← {Method} {Url} HTTP {Code} {Reason} ({Ms}ms) — body: {Body}",
+                    method.Method, url, code, resp.ReasonPhrase, sw.ElapsedMilliseconds,
+                    TextUtil.Truncate(responseBody, 500));
             }
 
-            _logger.LogError("RIS call ← {Method} {Url} HTTP {Code} {Reason} ({Ms}ms) — body: {Body}",
-                method.Method, url, code, resp.ReasonPhrase, sw.ElapsedMilliseconds,
-                TruncateForLog(responseBody, 500));
-            return RisResponse<TResult>.Failure(code, $"HTTP {code} {resp.ReasonPhrase}");
+            return new RawResult(code, responseBody, null, sw.ElapsedMilliseconds);
         }
         catch (Exception ex)
         {
             sw.Stop();
             _logger.LogError(ex, "RIS call ✗ {Method} {Url} EXCEPTION ({Ms}ms) — {Type}: {Message}",
                 method.Method, url, sw.ElapsedMilliseconds, ex.GetType().Name, ex.Message);
-            return RisResponse<TResult>.Failure(0, ex.Message);
+            return new RawResult(0, string.Empty, ex.Message, sw.ElapsedMilliseconds);
         }
     }
 
-    // ============== Void variant (no result payload) ==============
-
-    /// <summary>
-    /// Như CallWithAuthAsync nhưng cho endpoint trả result=null (vd 3 MPPS).
-    /// Chỉ check HTTP status code + message, không parse result.
-    /// </summary>
-    private async Task<RisResponse> CallWithAuthVoidAsync<TRequest>(
-        HttpMethod method,
-        string url,
-        TRequest body,
-        GatewayConfig cfg,
-        CancellationToken ct)
+    /// <summary>Gửi có Bearer; nếu 401 thì force refresh token + gửi lại đúng 1 lần.</summary>
+    private async Task<RawResult> SendWithAuthAsync<TRequest>(
+        HttpMethod method, string url, TRequest body, GatewayConfig cfg, CancellationToken ct)
     {
-        var result = await CallOnceVoidAsync(method, url, body, cfg, ct).ConfigureAwait(false);
-        if (result.HttpStatusCode != (int)HttpStatusCode.Unauthorized)
-        {
-            return result;
-        }
+        var raw = await SendOnceAsync(method, url, body, cfg, ct).ConfigureAwait(false);
+        if (raw.Code != (int)HttpStatusCode.Unauthorized) return raw;
 
         _logger.LogWarning("Got 401 from {Url}, forcing token refresh and retrying once", url);
         await ForceRefreshTokenAsync(cfg, ct).ConfigureAwait(false);
 
-        var retry = await CallOnceVoidAsync(method, url, body, cfg, ct).ConfigureAwait(false);
-        if (retry.HttpStatusCode == (int)HttpStatusCode.Unauthorized)
+        raw = await SendOnceAsync(method, url, body, cfg, ct).ConfigureAwait(false);
+        if (raw.Code == (int)HttpStatusCode.Unauthorized)
         {
             _logger.LogError("Still 401 after token refresh — credentials có thể sai hoặc bị thu hồi");
         }
-        return retry;
+        return raw;
     }
 
-    private async Task<RisResponse> CallOnceVoidAsync<TRequest>(
-        HttpMethod method,
-        string url,
-        TRequest body,
-        GatewayConfig cfg,
-        CancellationToken ct)
+    /// <summary>Parse cho endpoint CÓ payload: 200 → deserialize RisBaseResponse&lt;TResult&gt;.result.</summary>
+    private RisResponse<TResult> ParseResult<TResult>(RawResult raw, HttpMethod method, string url)
     {
-        var token = await GetTokenAsync(cfg, ct).ConfigureAwait(false);
-        if (token is null)
+        if (raw.Error is not null) return RisResponse<TResult>.Failure(raw.Code, raw.Error);
+
+        var code = raw.Code;
+        if (code == 200)
         {
-            _logger.LogError("RIS call {Method} {Url} aborted: không lấy được access token", method.Method, url);
-            return RisResponse.Failure(0, "Không lấy được access token (login thất bại?)");
+            var envelope = JsonUtil.TryDeserialize<RisBaseResponse<TResult>>(raw.Body);
+            if (envelope is null)
+            {
+                _logger.LogError("RIS call ← {Method} {Url} HTTP 200 ({Ms}ms) nhưng response không phải JSON chuẩn",
+                    method.Method, url, raw.ElapsedMs);
+                return RisResponse<TResult>.Failure(code, "Response 200 nhưng không phải JSON chuẩn (RisBaseResponse)");
+            }
+            if (envelope.Result is null)
+            {
+                _logger.LogWarning("RIS call ← {Method} {Url} HTTP 200 ({Ms}ms) — result null: {Message}",
+                    method.Method, url, raw.ElapsedMs, envelope.Message);
+                return RisResponse<TResult>.Failure(code, $"Response 200 nhưng field 'result' null: {envelope.Message}");
+            }
+            _logger.LogInformation("RIS call ← {Method} {Url} HTTP 200 ({Ms}ms) OK", method.Method, url, raw.ElapsedMs);
+            return RisResponse<TResult>.Success(envelope.Result, code);
         }
 
-        var sw = System.Diagnostics.Stopwatch.StartNew();
-        _logger.LogDebug("RIS call → {Method} {Url}", method.Method, url);
-
-        try
+        if (code == 400)
         {
-            using var req = new HttpRequestMessage(method, url)
-            {
-                Content = JsonContent.Create(body),
-            };
-            req.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
-
-            using var resp = await _http.SendAsync(req, HttpCompletionOption.ResponseContentRead, ct).ConfigureAwait(false);
-            sw.Stop();
-            var code = (int)resp.StatusCode;
-            var responseBody = await resp.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
-
-            if (code == 200)
-            {
-                _logger.LogInformation("RIS call ← {Method} {Url} HTTP 200 ({Ms}ms) OK",
-                    method.Method, url, sw.ElapsedMilliseconds);
-                return RisResponse.Success(code);
-            }
-
-            if (code == 400)
-            {
-                var err = TryDeserialize<RisErrorResponse>(responseBody);
-                var msg = err?.Message ?? "HTTP 400 (không parse được message)";
-                _logger.LogWarning("RIS call ← {Method} {Url} HTTP 400 ({Ms}ms) — {Message}",
-                    method.Method, url, sw.ElapsedMilliseconds, msg);
-                return RisResponse.Failure(code, msg);
-            }
-
-            if (code == (int)HttpStatusCode.Unauthorized)
-            {
-                _logger.LogWarning("RIS call ← {Method} {Url} HTTP 401 ({Ms}ms) — sẽ refresh token + retry",
-                    method.Method, url, sw.ElapsedMilliseconds);
-                return RisResponse.Failure(code, "HTTP 401 Unauthorized");
-            }
-
-            _logger.LogError("RIS call ← {Method} {Url} HTTP {Code} {Reason} ({Ms}ms) — body: {Body}",
-                method.Method, url, code, resp.ReasonPhrase, sw.ElapsedMilliseconds,
-                TruncateForLog(responseBody, 500));
-            return RisResponse.Failure(code, $"HTTP {code} {resp.ReasonPhrase}");
+            var msg = ExtractErrorMessage(raw.Body);
+            _logger.LogWarning("RIS call ← {Method} {Url} HTTP 400 ({Ms}ms) — {Message}", method.Method, url, raw.ElapsedMs, msg);
+            return RisResponse<TResult>.Failure(code, msg);
         }
-        catch (Exception ex)
-        {
-            sw.Stop();
-            _logger.LogError(ex, "RIS call ✗ {Method} {Url} EXCEPTION ({Ms}ms) — {Type}: {Message}",
-                method.Method, url, sw.ElapsedMilliseconds, ex.GetType().Name, ex.Message);
-            return RisResponse.Failure(0, ex.Message);
-        }
+        if (code == (int)HttpStatusCode.Unauthorized)
+            return RisResponse<TResult>.Failure(code, "HTTP 401 Unauthorized");
+
+        return RisResponse<TResult>.Failure(code, $"HTTP {code}");
     }
 
-    private static string TruncateForLog(string s, int maxLen)
+    /// <summary>Parse cho endpoint KHÔNG payload (3 MPPS trả result=null): chỉ xét status.</summary>
+    private RisResponse ParseVoid(RawResult raw, HttpMethod method, string url)
     {
-        if (string.IsNullOrEmpty(s)) return string.Empty;
-        return s.Length <= maxLen ? s : s.Substring(0, maxLen) + "…(truncated)";
+        if (raw.Error is not null) return RisResponse.Failure(raw.Code, raw.Error);
+
+        var code = raw.Code;
+        if (code == 200)
+        {
+            _logger.LogInformation("RIS call ← {Method} {Url} HTTP 200 ({Ms}ms) OK", method.Method, url, raw.ElapsedMs);
+            return RisResponse.Success(code);
+        }
+        if (code == 400)
+        {
+            var msg = ExtractErrorMessage(raw.Body);
+            _logger.LogWarning("RIS call ← {Method} {Url} HTTP 400 ({Ms}ms) — {Message}", method.Method, url, raw.ElapsedMs, msg);
+            return RisResponse.Failure(code, msg);
+        }
+        if (code == (int)HttpStatusCode.Unauthorized)
+            return RisResponse.Failure(code, "HTTP 401 Unauthorized");
+
+        return RisResponse.Failure(code, $"HTTP {code}");
+    }
+
+    private static string ExtractErrorMessage(string body)
+    {
+        var err = JsonUtil.TryDeserialize<RisErrorResponse>(body);
+        return err?.Message ?? "HTTP 400 (không parse được message)";
     }
 
     // ============== Token management ==============
@@ -499,13 +444,6 @@ public sealed class HttpRisClient : IRisClient, IDisposable
 
     // Ghép URL dùng helper chung (UrlHelper) — không tự normalize riêng nữa.
     private static string CombineUrl(string baseUrl, string path) => UrlHelper.Combine(baseUrl, path);
-
-    private static T? TryDeserialize<T>(string body) where T : class
-    {
-        if (string.IsNullOrWhiteSpace(body)) return null;
-        try { return JsonSerializer.Deserialize<T>(body); }
-        catch { return null; }
-    }
 
     public void Dispose()
     {

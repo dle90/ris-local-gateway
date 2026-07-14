@@ -4,7 +4,7 @@
         xmlns:vm="clr-namespace:Medisync.RisLocalGateway.ConfigApp.ViewModels"
         xmlns:sys="clr-namespace:System;assembly=mscorlib"
         Title="RIS Local Gateway"
-        Width="900" Height="640"
+        Width="1120" Height="680" MinWidth="900"
         WindowStartupLocation="CenterScreen"
         FontFamily="Segoe UI" FontSize="13">
     <Window.DataContext>
@@ -419,6 +419,12 @@
                             </StackPanel>
 
                             <StackPanel Orientation="Horizontal">
+                                <TextBlock Text="Nguồn:" VerticalAlignment="Center" Margin="0,0,6,0" />
+                                <RadioButton Content="Service" GroupName="LogSource"
+                                             IsChecked="{Binding ShowServiceLog}"
+                                             VerticalAlignment="Center" Margin="0,0,8,0" />
+                                <RadioButton Content="ConfigApp" GroupName="LogSource"
+                                             VerticalAlignment="Center" Margin="0,0,16,0" />
                                 <CheckBox Content="INF" IsChecked="{Binding ShowInfo}"
                                           VerticalAlignment="Center" Margin="0,0,8,0" />
                                 <CheckBox Content="WRN" IsChecked="{Binding ShowWarning}"
@@ -461,7 +467,307 @@
                 </DockPanel>
             </TabItem>
 
-            <!-- ============ Tab 4: THÔNG TIN ============ -->
+            <!-- ============ Tab 4: DANH SÁCH STUDY ============ -->
+            <TabItem Header="Danh sách study" FontSize="13" Padding="14,8">
+                <DockPanel DataContext="{Binding ReceivedStudies}">
+                    <!-- Toolbar: filter ngày + refresh -->
+                    <Border DockPanel.Dock="Top" Background="#F9FAFB"
+                            BorderBrush="#E5E7EB" BorderThickness="0,0,0,1" Padding="12,10">
+                        <StackPanel>
+                            <TextBlock TextWrapping="Wrap" Foreground="#374151"
+                                       Text="Danh sách study đã gửi ảnh tới gateway (lưu local, giữ 90 ngày). Đã nhận = số ảnh nhận qua C-STORE; Đã đẩy = đẩy PACS thành công; Dead-letter = ảnh lỗi chờ đẩy lại." />
+                            <StackPanel Orientation="Horizontal" Margin="0,10,0,0">
+                                <TextBlock Text="Từ ngày:" VerticalAlignment="Center" Margin="0,0,6,0" />
+                                <Grid VerticalAlignment="Center" Margin="0,0,16,0">
+                                    <ToggleButton x:Name="FromToggle" Style="{StaticResource DateFilterToggleStyle}">
+                                        <TextBlock Text="{Binding FromDate, StringFormat='dd/MM/yyyy'}"
+                                                   Foreground="#111827" />
+                                    </ToggleButton>
+                                    <Popup IsOpen="{Binding IsChecked, ElementName=FromToggle}"
+                                           PlacementTarget="{Binding ElementName=FromToggle}"
+                                           Placement="Bottom" StaysOpen="False" AllowsTransparency="True"
+                                           VerticalOffset="4">
+                                        <Border Background="White" BorderBrush="#E5E7EB" BorderThickness="1"
+                                                CornerRadius="8" Padding="6">
+                                            <Border.Effect>
+                                                <DropShadowEffect Color="#40000000" BlurRadius="14"
+                                                                  ShadowDepth="2" Direction="270" />
+                                            </Border.Effect>
+                                            <Calendar x:Name="FromCalendar"
+                                                      SelectedDate="{Binding FromDate, Mode=TwoWay}"
+                                                      DisplayDate="{Binding FromDate}"
+                                                      Style="{StaticResource ModernCalendarStyle}"
+                                                      SelectedDatesChanged="OnFromDateSelected" />
+                                        </Border>
+                                    </Popup>
+                                </Grid>
+                                <TextBlock Text="Đến ngày:" VerticalAlignment="Center" Margin="0,0,6,0" />
+                                <Grid VerticalAlignment="Center" Margin="0,0,16,0">
+                                    <ToggleButton x:Name="ToToggle" Style="{StaticResource DateFilterToggleStyle}">
+                                        <TextBlock Text="{Binding ToDate, StringFormat='dd/MM/yyyy'}"
+                                                   Foreground="#111827" />
+                                    </ToggleButton>
+                                    <Popup IsOpen="{Binding IsChecked, ElementName=ToToggle}"
+                                           PlacementTarget="{Binding ElementName=ToToggle}"
+                                           Placement="Bottom" StaysOpen="False" AllowsTransparency="True"
+                                           VerticalOffset="4">
+                                        <Border Background="White" BorderBrush="#E5E7EB" BorderThickness="1"
+                                                CornerRadius="8" Padding="6">
+                                            <Border.Effect>
+                                                <DropShadowEffect Color="#40000000" BlurRadius="14"
+                                                                  ShadowDepth="2" Direction="270" />
+                                            </Border.Effect>
+                                            <Calendar x:Name="ToCalendar"
+                                                      SelectedDate="{Binding ToDate, Mode=TwoWay}"
+                                                      DisplayDate="{Binding ToDate}"
+                                                      Style="{StaticResource ModernCalendarStyle}"
+                                                      SelectedDatesChanged="OnToDateSelected" />
+                                        </Border>
+                                    </Popup>
+                                </Grid>
+                                <Button Content="🔄 Làm mới" Command="{Binding RefreshCommand}"
+                                        MinWidth="110" Height="32" Padding="12,4" />
+                            </StackPanel>
+                        </StackPanel>
+                    </Border>
+
+                    <!-- Footer: status -->
+                    <Border DockPanel.Dock="Bottom" Background="#F3F4F6"
+                            BorderBrush="#E5E7EB" BorderThickness="0,1,0,0" Padding="12,6">
+                        <TextBlock Text="{Binding StatusText}" Foreground="{Binding StatusColor}"
+                                   TextWrapping="Wrap" />
+                    </Border>
+
+                    <!-- Danh sách study -->
+                    <DataGrid ItemsSource="{Binding Rows}"
+                              AutoGenerateColumns="False" IsReadOnly="True"
+                              CanUserAddRows="False" CanUserDeleteRows="False"
+                              CanUserSortColumns="True" Sorting="OnStudiesSorting"
+                              CanUserResizeColumns="True"
+                              SelectionMode="Single" SelectionUnit="FullRow"
+                              GridLinesVisibility="Horizontal" HorizontalGridLinesBrush="#E5E7EB"
+                              AlternatingRowBackground="#F9FAFB" BorderThickness="0"
+                              FontSize="12" RowHeight="26"
+                              HeadersVisibility="Column"
+                              ScrollViewer.HorizontalScrollBarVisibility="Auto">
+                        <DataGrid.Resources>
+                            <!-- Tay kéo resize (gripper) ở mép cột — vô hình, con trỏ đổi thành mũi tên ngang -->
+                            <Style x:Key="ColumnGripperStyle" TargetType="Thumb">
+                                <Setter Property="Width" Value="8" />
+                                <Setter Property="Background" Value="Transparent" />
+                                <Setter Property="Cursor" Value="SizeWE" />
+                                <Setter Property="Template">
+                                    <Setter.Value>
+                                        <ControlTemplate TargetType="Thumb">
+                                            <Border Background="Transparent" />
+                                        </ControlTemplate>
+                                    </Setter.Value>
+                                </Setter>
+                            </Style>
+                        </DataGrid.Resources>
+                        <DataGrid.ColumnHeaderStyle>
+                            <Style TargetType="DataGridColumnHeader">
+                                <Setter Property="Background" Value="#F3F4F6" />
+                                <Setter Property="FontWeight" Value="SemiBold" />
+                                <Setter Property="Padding" Value="8,6" />
+                                <Setter Property="Cursor" Value="Hand" />
+                                <Setter Property="Template">
+                                    <Setter.Value>
+                                        <ControlTemplate TargetType="DataGridColumnHeader">
+                                            <Grid>
+                                                <Border Background="{TemplateBinding Background}"
+                                                        BorderBrush="#E5E7EB" BorderThickness="0,0,1,1"
+                                                        Padding="{TemplateBinding Padding}">
+                                                    <Grid>
+                                                        <Grid.ColumnDefinitions>
+                                                            <ColumnDefinition Width="*" />
+                                                            <!-- Vùng mũi tên chiếm chỗ cố định để SizeToHeader chừa sẵn, không bị cắt khi sort -->
+                                                            <ColumnDefinition Width="16" />
+                                                        </Grid.ColumnDefinitions>
+                                                        <ContentPresenter Grid.Column="0" VerticalAlignment="Center"
+                                                                          HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}" />
+                                                        <!-- Mũi tên cột đang sort: ▲ tăng dần, ▼ giảm dần -->
+                                                        <TextBlock x:Name="SortArrow" Grid.Column="1"
+                                                                   HorizontalAlignment="Center" VerticalAlignment="Center"
+                                                                   FontSize="10" Foreground="#2563EB"
+                                                                   Visibility="Collapsed" />
+                                                    </Grid>
+                                                </Border>
+                                                <!-- Grippers: DataGrid tự nối dây resize theo tên PART_*HeaderGripper -->
+                                                <Thumb x:Name="PART_LeftHeaderGripper" HorizontalAlignment="Left"
+                                                       Style="{StaticResource ColumnGripperStyle}" />
+                                                <Thumb x:Name="PART_RightHeaderGripper" HorizontalAlignment="Right"
+                                                       Style="{StaticResource ColumnGripperStyle}" />
+                                            </Grid>
+                                            <ControlTemplate.Triggers>
+                                                <Trigger Property="SortDirection" Value="Ascending">
+                                                    <Setter TargetName="SortArrow" Property="Text" Value="▲" />
+                                                    <Setter TargetName="SortArrow" Property="Visibility" Value="Visible" />
+                                                </Trigger>
+                                                <Trigger Property="SortDirection" Value="Descending">
+                                                    <Setter TargetName="SortArrow" Property="Text" Value="▼" />
+                                                    <Setter TargetName="SortArrow" Property="Visibility" Value="Visible" />
+                                                </Trigger>
+                                                <Trigger Property="IsMouseOver" Value="True">
+                                                    <Setter Property="Background" Value="#E5E7EB" />
+                                                </Trigger>
+                                            </ControlTemplate.Triggers>
+                                        </ControlTemplate>
+                                    </Setter.Value>
+                                </Setter>
+                            </Style>
+                        </DataGrid.ColumnHeaderStyle>
+                        <DataGrid.Columns>
+                            <!-- Ngày nhận: hiển thị dd/MM/yyyy HH:mm:ss nhưng SORT theo UTC ISO (đúng thứ tự thời gian) -->
+                            <DataGridTextColumn Header="Ngày nhận" Binding="{Binding FirstReceivedText}"
+                                                SortMemberPath="FirstReceivedUtc" Width="150" />
+                            <DataGridTextColumn Header="Accession" Binding="{Binding AccessionNumber}" Width="105" />
+                            <!-- Study UID dài: hiện gọn + tooltip full khi hover -->
+                            <DataGridTextColumn Header="Study UID" Binding="{Binding StudyUid}" Width="210">
+                                <DataGridTextColumn.ElementStyle>
+                                    <Style TargetType="TextBlock">
+                                        <Setter Property="FontFamily" Value="Consolas, Courier New" />
+                                        <Setter Property="Foreground" Value="#6B7280" />
+                                        <Setter Property="TextTrimming" Value="CharacterEllipsis" />
+                                        <Setter Property="ToolTip" Value="{Binding StudyUid}" />
+                                    </Style>
+                                </DataGridTextColumn.ElementStyle>
+                            </DataGridTextColumn>
+                            <DataGridTextColumn Header="AE máy chụp" Binding="{Binding CallingAe}" Width="115" />
+                            <DataGridTextColumn Header="Modality" Binding="{Binding Modality}" Width="SizeToHeader" />
+                            <DataGridTextColumn Header="Mã BN" Binding="{Binding PatientId}" Width="95" />
+                            <DataGridTextColumn Header="Tên BN" Binding="{Binding PatientName}" Width="150" />
+                            <!-- Mô tả co giãn lấp phần rộng còn lại -->
+                            <DataGridTextColumn Header="Mô tả" Binding="{Binding StudyDescription}" Width="*" MinWidth="160" />
+                            <!-- 3 cột đếm: co đúng bằng tên cột (SizeToHeader), số căn phải -->
+                            <DataGridTextColumn Header="Đã nhận" Binding="{Binding ReceivedCount}" Width="SizeToHeader">
+                                <DataGridTextColumn.ElementStyle>
+                                    <Style TargetType="TextBlock">
+                                        <Setter Property="HorizontalAlignment" Value="Right" />
+                                        <Setter Property="Margin" Value="0,0,12,0" />
+                                        <Setter Property="FontWeight" Value="Bold" />
+                                        <Setter Property="Foreground" Value="#1D4ED8" />
+                                    </Style>
+                                </DataGridTextColumn.ElementStyle>
+                            </DataGridTextColumn>
+                            <DataGridTextColumn Header="Đã đẩy PACS" Binding="{Binding PushedCount}" Width="SizeToHeader">
+                                <DataGridTextColumn.ElementStyle>
+                                    <Style TargetType="TextBlock">
+                                        <Setter Property="HorizontalAlignment" Value="Right" />
+                                        <Setter Property="Margin" Value="0,0,12,0" />
+                                        <Setter Property="FontWeight" Value="Bold" />
+                                        <Setter Property="Foreground" Value="#2E7D32" />
+                                    </Style>
+                                </DataGridTextColumn.ElementStyle>
+                            </DataGridTextColumn>
+                            <!-- Thất bại: =0 xanh lá đậm, >0 đỏ đậm -->
+                            <DataGridTextColumn Header="Thất bại" Binding="{Binding FailedCount}" Width="SizeToHeader">
+                                <DataGridTextColumn.ElementStyle>
+                                    <Style TargetType="TextBlock">
+                                        <Setter Property="HorizontalAlignment" Value="Right" />
+                                        <Setter Property="Margin" Value="0,0,12,0" />
+                                        <Setter Property="FontWeight" Value="Bold" />
+                                        <Setter Property="Foreground" Value="#C62828" />
+                                        <Style.Triggers>
+                                            <DataTrigger Binding="{Binding FailedCount}" Value="0">
+                                                <Setter Property="Foreground" Value="#2E7D32" />
+                                            </DataTrigger>
+                                        </Style.Triggers>
+                                    </Style>
+                                </DataGridTextColumn.ElementStyle>
+                            </DataGridTextColumn>
+                        </DataGrid.Columns>
+                    </DataGrid>
+                </DockPanel>
+            </TabItem>
+
+            <!-- ============ Tab 5: ĐẨY LẠI ẢNH LỖI (DEAD-LETTER) ============ -->
+            <TabItem Header="Đẩy lại ảnh lỗi" FontSize="13" Padding="14,8">
+                <DockPanel DataContext="{Binding DeadLetter}">
+                    <!-- Toolbar -->
+                    <Border DockPanel.Dock="Top" Background="#F9FAFB"
+                            BorderBrush="#E5E7EB" BorderThickness="0,0,0,1" Padding="12,10">
+                        <StackPanel>
+                            <TextBlock TextWrapping="Wrap" Foreground="#374151"
+                                       Text="Đẩy lại (re-drive) các ảnh DICOM đã vào dead-letter lên PACS. Đẩy tuần tự từng ảnh; nếu 10 ảnh lỗi liên tiếp sẽ tự dừng (PACS/mạng có thể đang lỗi). Ảnh đẩy thành công được xoá khỏi dead-letter." />
+                            <DockPanel Margin="0,10,0,0">
+                                <TextBlock DockPanel.Dock="Right"
+                                           Text="{Binding FailedCount, StringFormat='Tổng: {0} file'}"
+                                           FontWeight="SemiBold" FontSize="14"
+                                           VerticalAlignment="Center" />
+                                <StackPanel Orientation="Horizontal">
+                                    <Button Content="🔄 Làm mới" Command="{Binding RefreshCommand}"
+                                            MinWidth="110" Height="32" Padding="12,4" Margin="0,0,8,0" />
+                                    <Button Content="▶ Đẩy lại tất cả" Command="{Binding RedriveAllCommand}"
+                                            IsEnabled="{Binding CanRedrive}"
+                                            Background="#1976D2" Foreground="White" FontWeight="SemiBold"
+                                            MinWidth="160" Height="32" Padding="12,4" BorderThickness="0" Margin="0,0,8,0" />
+                                    <Button Content="✕ Hủy" Command="{Binding CancelCommand}"
+                                            IsEnabled="{Binding IsRunning}"
+                                            MinWidth="80" Height="32" Padding="12,4" Margin="0,0,8,0" />
+                                    <Button Content="📂 Mở thư mục dead-letter" Command="{Binding OpenFailedFolderCommand}"
+                                            MinWidth="190" Height="32" Padding="12,4" />
+                                </StackPanel>
+                            </DockPanel>
+                        </StackPanel>
+                    </Border>
+
+                    <!-- Footer: progress + bộ đếm + status -->
+                    <Border DockPanel.Dock="Bottom" Background="#F3F4F6"
+                            BorderBrush="#E5E7EB" BorderThickness="0,1,0,0" Padding="12,10">
+                        <StackPanel>
+                            <ProgressBar Height="18" Minimum="0"
+                                         Maximum="{Binding ProgressMax}" Value="{Binding ProgressValue}" />
+                            <StackPanel Orientation="Horizontal" Margin="0,6,0,0">
+                                <TextBlock Text="{Binding TotalToPush, StringFormat='Cần đẩy: {0}'}"
+                                           FontWeight="SemiBold" Margin="0,0,20,0" />
+                                <TextBlock Text="{Binding SuccessCount, StringFormat='Thành công: {0}'}"
+                                           FontWeight="SemiBold" Foreground="#2E7D32" Margin="0,0,20,0" />
+                                <TextBlock Text="{Binding FailCount, StringFormat='Lỗi: {0}'}"
+                                           FontWeight="SemiBold" Foreground="#C62828" Margin="0,0,20,0" />
+                                <TextBlock Text="{Binding CurrentFileName}" Foreground="#6B7280"
+                                           FontSize="11" VerticalAlignment="Center"
+                                           TextTrimming="CharacterEllipsis" />
+                            </StackPanel>
+                            <TextBlock Text="{Binding StatusText}" Foreground="{Binding StatusColor}"
+                                       TextWrapping="Wrap" Margin="0,4,0,0" />
+                            <TextBlock Text="{Binding FailedDirPath, StringFormat='Thư mục: {0}'}"
+                                       Foreground="#9CA3AF" FontSize="11" Margin="0,4,0,0"
+                                       TextTrimming="CharacterEllipsis" />
+                        </StackPanel>
+                    </Border>
+
+                    <!-- Danh sách tên file dead-letter (1 cột, có header) -->
+                    <ListView ItemsSource="{Binding FailedFiles}" BorderThickness="0"
+                              FontSize="12" AlternationCount="2"
+                              ScrollViewer.HorizontalScrollBarVisibility="Auto">
+                        <ListView.View>
+                            <GridView>
+                                <GridViewColumn Header="Tên file" Width="800">
+                                    <GridViewColumn.CellTemplate>
+                                        <DataTemplate>
+                                            <TextBlock Text="{Binding}" FontFamily="Consolas, Courier New" />
+                                        </DataTemplate>
+                                    </GridViewColumn.CellTemplate>
+                                </GridViewColumn>
+                            </GridView>
+                        </ListView.View>
+                        <ListView.ItemContainerStyle>
+                            <Style TargetType="ListViewItem">
+                                <Setter Property="Padding" Value="6,3" />
+                                <Style.Triggers>
+                                    <!-- Kẻ sọc xen kẽ cho dễ đọc -->
+                                    <Trigger Property="ItemsControl.AlternationIndex" Value="1">
+                                        <Setter Property="Background" Value="#F9FAFB" />
+                                    </Trigger>
+                                </Style.Triggers>
+                            </Style>
+                        </ListView.ItemContainerStyle>
+                    </ListView>
+                </DockPanel>
+            </TabItem>
+
+            <!-- ============ Tab 6: THÔNG TIN ============ -->
             <TabItem Header="Thông tin" FontSize="13" Padding="14,8">
                 <ScrollViewer VerticalScrollBarVisibility="Auto">
                     <Grid Margin="20" DataContext="{Binding About}">

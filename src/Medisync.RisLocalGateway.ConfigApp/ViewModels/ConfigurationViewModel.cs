@@ -31,7 +31,7 @@ public partial class ConfigurationViewModel : ObservableObject
     // === DICOM section ===
 
     [ObservableProperty] private string _aeTitle = "RIS_GW";
-    [ObservableProperty] private int _port = 11112;
+    [ObservableProperty] private int _port = 4646;
     [ObservableProperty] private string _storageDirectory = string.Empty;
     [ObservableProperty] private string _dicomStatus = string.Empty;
     [ObservableProperty] private Brush _dicomStatusColor = Brushes.Black;
@@ -42,7 +42,7 @@ public partial class ConfigurationViewModel : ObservableObject
     [ObservableProperty] private int _pacsTimeoutSeconds = 120;
     [ObservableProperty] private bool _pacsCompressionEnabled = true;
     [ObservableProperty] private int _pacsScanIntervalSeconds = 15;
-    [ObservableProperty] private int _pacsMaxRetries = 10;
+    [ObservableProperty] private int _pacsMaxRetries = 1000; // khớp default PacsConfig.MaxRetries
     [ObservableProperty] private int _pacsMaxParallelForwards = 4;
     [ObservableProperty] private string _pacsStatus = string.Empty;
     [ObservableProperty] private Brush _pacsStatusColor = Brushes.Black;
@@ -125,13 +125,11 @@ public partial class ConfigurationViewModel : ObservableObject
                 return;
             }
 
-            var cfg = _store.Load();
-            cfg.Dicom = new DicomConfig
-            {
-                AeTitle = AeTitle.Trim(),
-                Port = Port,
-                StorageDirectory = StorageDirectory?.Trim() ?? string.Empty,
-            };
+            // LoadCopy: sửa trên bản copy — cache in-memory chỉ đổi khi Save thành công.
+            var cfg = _store.LoadCopy();
+            cfg.Dicom.AeTitle = AeTitle.Trim();
+            cfg.Dicom.Port = Port;
+            cfg.Dicom.StorageDirectory = StorageDirectory?.Trim() ?? string.Empty;
 
             _store.Save(cfg);
             SetDicomStatus("Đã lưu cấu hình DICOM. SCP sẽ restart nếu AE/Port đổi.", ok: true);
@@ -147,7 +145,7 @@ public partial class ConfigurationViewModel : ObservableObject
     {
         try
         {
-            var cfg = _store.Load();
+            var cfg = _store.Reload(); // ép đọc lại từ file (bỏ chỉnh sửa chưa lưu)
             AeTitle = cfg.Dicom.AeTitle;
             Port = cfg.Dicom.Port;
             StorageDirectory = cfg.Dicom.StorageDirectory;
@@ -194,17 +192,15 @@ public partial class ConfigurationViewModel : ObservableObject
                 return;
             }
 
-            // Chỉ replace PACS section, giữ nguyên RIS/DICOM.
-            var cfg = _store.Load();
-            cfg.Pacs = new PacsConfig
-            {
-                StowUrl = url,
-                TimeoutSeconds = PacsTimeoutSeconds,
-                ScanIntervalSeconds = PacsScanIntervalSeconds > 0 ? PacsScanIntervalSeconds : 15,
-                MaxRetries = PacsMaxRetries > 0 ? PacsMaxRetries : 10,
-                MaxParallelForwards = PacsMaxParallelForwards > 0 ? PacsMaxParallelForwards : 4,
-                CompressionEnabled = PacsCompressionEnabled,
-            };
+            // LoadCopy + mutate TỪNG field UI quản lý — GIỮ NGUYÊN các field không có trên UI
+            // (CompressionCodec, Htj2kModalities admin chỉnh tay trong config.json) và RIS/DICOM.
+            var cfg = _store.LoadCopy();
+            cfg.Pacs.StowUrl = url;
+            cfg.Pacs.TimeoutSeconds = PacsTimeoutSeconds;
+            cfg.Pacs.ScanIntervalSeconds = PacsScanIntervalSeconds > 0 ? PacsScanIntervalSeconds : 15;
+            cfg.Pacs.MaxRetries = PacsMaxRetries > 0 ? PacsMaxRetries : 1000;
+            cfg.Pacs.MaxParallelForwards = PacsMaxParallelForwards > 0 ? PacsMaxParallelForwards : 4;
+            cfg.Pacs.CompressionEnabled = PacsCompressionEnabled;
 
             _store.Save(cfg);
             SetPacsStatus("Đã lưu cấu hình PACS. Service sẽ tự nạp lại.", ok: true);
@@ -220,7 +216,7 @@ public partial class ConfigurationViewModel : ObservableObject
     {
         try
         {
-            var cfg = _store.Load();
+            var cfg = _store.Reload(); // ép đọc lại từ file (bỏ chỉnh sửa chưa lưu)
             PacsStowUrl = cfg.Pacs.StowUrl;
             PacsTimeoutSeconds = cfg.Pacs.TimeoutSeconds;
             PacsCompressionEnabled = cfg.Pacs.CompressionEnabled;

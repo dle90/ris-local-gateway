@@ -20,8 +20,13 @@ public sealed class GatewayWorker : BackgroundService
     private readonly DicomServerHost _dicomServer;
     private readonly SpoolStore _spool;
     private readonly SemaphoreSlim _lifecycleLock = new(1, 1); // serialize Start/Stop SCP (watchdog vs config-reload)
+    private readonly SemaphoreSlim _reloadLock = new(1, 1);    // serialize reload config (watcher event vs watchdog fallback)
     private FileSystemWatcher? _watcher;
     private GatewayConfig _currentConfig = GatewayConfig.CreateDefault();
+    // LastWriteTimeUtc của config.json lần áp dụng gần nhất — watchdog so sánh để bắt
+    // trường hợp FileSystemWatcher trượt event (ghi lúc service mới khởi động, buffer overflow).
+    // Vì config giờ CACHE in-memory, miss event = kẹt config cũ vĩnh viễn nếu không có fallback này.
+    private DateTime _lastConfigWriteUtc;
 
     public GatewayWorker(
         ILogger<GatewayWorker> logger,
@@ -40,11 +45,13 @@ public sealed class GatewayWorker : BackgroundService
         _logger.LogInformation("GatewayWorker starting");
 
         _currentConfig = _configStore.Load();
+        _lastConfigWriteUtc = GetConfigWriteTimeUtc();
         await _dicomServer.StartAsync(_currentConfig.Dicom, stoppingToken).ConfigureAwait(false);
 
         SetupConfigWatcher();
 
-        // Watchdog loop: định kỳ kiểm tra SCP còn LISTEN không, tự dựng lại nếu chết ngầm.
+        // Watchdog loop: định kỳ (1) kiểm tra SCP còn LISTEN không, tự dựng lại nếu chết ngầm;
+        // (2) fallback bắt thay đổi config.json mà FileSystemWatcher trượt event.
         try
         {
             while (!stoppingToken.IsCancellationRequested)
@@ -66,12 +73,25 @@ public sealed class GatewayWorker : BackgroundService
                         _logger.LogError(ex, "Watchdog: khởi động lại SCP thất bại — sẽ thử lại vòng sau");
                     }
                 }
+
+                // Fallback reload: file đổi mà watcher không bắn (miss event) → vẫn nạp lại sau ≤30s.
+                if (GetConfigWriteTimeUtc() != _lastConfigWriteUtc)
+                {
+                    _logger.LogInformation("Watchdog: phát hiện config.json thay đổi (watcher có thể đã trượt event) — nạp lại");
+                    await ReloadAndApplyConfigAsync().ConfigureAwait(false);
+                }
             }
         }
         catch (OperationCanceledException)
         {
             // shutting down
         }
+    }
+
+    private static DateTime GetConfigWriteTimeUtc()
+    {
+        try { return File.GetLastWriteTimeUtc(ConfigPaths.ConfigFile); }
+        catch { return DateTime.MinValue; }
     }
 
     /// <summary>Dừng rồi khởi động lại SCP, serialize qua _lifecycleLock để watchdog và config-reload không đua.</summary>
@@ -117,13 +137,47 @@ public sealed class GatewayWorker : BackgroundService
         {
             // file might still be locked by writer; small delay
             await Task.Delay(300).ConfigureAwait(false);
-            var newCfg = _configStore.Load();
+            await ReloadAndApplyConfigAsync().ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to reload config");
+        }
+    }
+
+    /// <summary>
+    /// Đọc lại config.json từ đĩa (invalidate cache in-memory) + áp thay đổi (spool dir, restart SCP).
+    /// Gọi từ 2 nơi: FileSystemWatcher event và watchdog fallback — serialize qua _reloadLock
+    /// để 2 đường không đua nhau restart SCP / Reconfigure spool.
+    /// </summary>
+    private async Task ReloadAndApplyConfigAsync()
+    {
+        await _reloadLock.WaitAsync().ConfigureAwait(false);
+        try
+        {
+            // Ghi nhận write-time TRƯỚC khi đọc: nếu file bị ghi tiếp ngay sau đó, write-time mới
+            // sẽ khác → watchdog vòng sau reload lại (thà thừa còn hơn sót).
+            var writeTimeUtc = GetConfigWriteTimeUtc();
+
+            // BẮT BUỘC Reload() (không phải Load()): Load() trả bản cache CŨ nên so sánh old/new
+            // sẽ trùng và không nhận ra thay đổi. Reload() đọc lỗi → giữ bản cũ (xem ConfigStore).
+            var oldCfg = _currentConfig;
+            var newCfg = _configStore.Reload();
+            _lastConfigWriteUtc = writeTimeUtc;
+
+            if (ReferenceEquals(newCfg, oldCfg))
+            {
+                // Reload thất bại giữ bản cũ (file đang bị writer giữ) — watchdog sẽ thử lại vòng sau.
+                _logger.LogWarning("Config reload: chưa đọc được file (writer đang giữ?) — giữ config hiện hành, sẽ thử lại");
+                _lastConfigWriteUtc = DateTime.MinValue; // ép watchdog vòng sau reload lại
+                return;
+            }
 
             var dicomChanged =
-                newCfg.Dicom.AeTitle != _currentConfig.Dicom.AeTitle ||
-                newCfg.Dicom.Port != _currentConfig.Dicom.Port;
+                newCfg.Dicom.AeTitle != oldCfg.Dicom.AeTitle ||
+                newCfg.Dicom.Port != oldCfg.Dicom.Port;
             var storageChanged = !string.Equals(
-                newCfg.Dicom.StorageDirectory, _currentConfig.Dicom.StorageDirectory, StringComparison.OrdinalIgnoreCase);
+                newCfg.Dicom.StorageDirectory, oldCfg.Dicom.StorageDirectory, StringComparison.OrdinalIgnoreCase);
 
             _currentConfig = newCfg;
 
@@ -143,9 +197,9 @@ public sealed class GatewayWorker : BackgroundService
                 _logger.LogInformation("Config reloaded (no SCP restart)");
             }
         }
-        catch (Exception ex)
+        finally
         {
-            _logger.LogError(ex, "Failed to reload config");
+            _reloadLock.Release();
         }
     }
 }

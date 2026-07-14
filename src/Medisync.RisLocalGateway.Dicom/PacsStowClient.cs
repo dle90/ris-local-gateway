@@ -8,6 +8,7 @@ using FellowOakDicom;
 using FellowOakDicom.Imaging.Codec;
 using Medisync.RisLocalGateway.Core.Configuration;
 using Medisync.RisLocalGateway.Core.Ris;
+using Medisync.RisLocalGateway.Core.Utils;
 using Microsoft.Extensions.Logging;
 
 namespace Medisync.RisLocalGateway.Dicom;
@@ -60,7 +61,13 @@ public sealed class PacsStowClient : IPacsStowClient, IDisposable
         _logger = logger;
         // Timeout vô hạn ở HttpClient; timeout thực thi qua CancellationToken mỗi request
         // (đổi HttpClient.Timeout sau request đầu tiên sẽ ném lỗi).
-        _http = new HttpClient { Timeout = Timeout.InfiniteTimeSpan };
+        // PooledConnectionLifetime: recycle connection 5' để re-resolve DNS khi PACS/proxy đổi IP
+        // (service chạy 24/7, không có dịp restart để làm mới connection pool).
+        _http = new HttpClient(new SocketsHttpHandler
+        {
+            PooledConnectionLifetime = TimeSpan.FromMinutes(5),
+        })
+        { Timeout = Timeout.InfiniteTimeSpan };
     }
 
     public async Task<ForwardResult> ForwardAsync(DicomFile file, CancellationToken ct = default)
@@ -138,9 +145,9 @@ public sealed class PacsStowClient : IPacsStowClient, IDisposable
 
             var body = await resp.Content.ReadAsStringAsync(sendCt).ConfigureAwait(false);
             var outcome = ClassifyFailure(code);
-            var detail = $"HTTP {code} {resp.ReasonPhrase}: {Truncate(body, 300)}";
+            var detail = $"HTTP {code} {resp.ReasonPhrase}: {TextUtil.Truncate(body, 300)}";
             _logger.LogError("STOW ← {Code} {Reason} ({Ms}ms) sop={Sop} [{Outcome}] — {Body}",
-                code, resp.ReasonPhrase, sw.ElapsedMilliseconds, sop, outcome, Truncate(body, 500));
+                code, resp.ReasonPhrase, sw.ElapsedMilliseconds, sop, outcome, TextUtil.Truncate(body, 500));
             return new ForwardResult(outcome, detail);
         }
         catch (OperationCanceledException) when (cts.IsCancellationRequested && !ct.IsCancellationRequested)
@@ -220,9 +227,6 @@ public sealed class PacsStowClient : IPacsStowClient, IDisposable
         "HTJ2KRPCL" or "HTJ2K-RPCL"  => DicomTransferSyntax.HTJ2KLosslessRPCL,
         _                            => DicomTransferSyntax.JPEGLSLossless,
     };
-
-    private static string Truncate(string s, int max)
-        => string.IsNullOrEmpty(s) ? string.Empty : (s.Length <= max ? s : s.Substring(0, max) + "…");
 
     public void Dispose() => _http.Dispose();
 }

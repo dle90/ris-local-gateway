@@ -1,12 +1,13 @@
 using System;
 using System.Collections.Generic;
-using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
 using FellowOakDicom;
 using FellowOakDicom.Network;
 using Medisync.RisLocalGateway.Core.Ris;
 using Medisync.RisLocalGateway.Core.Ris.Models;
+using Medisync.RisLocalGateway.Dicom.Mappers;
+using Medisync.RisLocalGateway.Dicom.Stats;
 using Microsoft.Extensions.Logging;
 
 namespace Medisync.RisLocalGateway.Dicom;
@@ -36,6 +37,12 @@ public sealed class RisGatewayDicomProvider :
     /// vì fo-dicom 5.x không inject được vào Provider.
     /// </summary>
     public static SpoolStore? Spool { get; set; }
+
+    /// <summary>
+    /// Thống kê study local (tab "Study đã nhận"). Set 1 lần lúc Service start (static vì
+    /// fo-dicom 5.x không inject được vào Provider). Null = không ghi thống kê.
+    /// </summary>
+    public static StudyStatsStore? Stats { get; set; }
 
     private static readonly DicomTransferSyntax[] AcceptedTransferSyntaxes =
     {
@@ -159,7 +166,7 @@ public sealed class RisGatewayDicomProvider :
 
     public async IAsyncEnumerable<DicomCFindResponse> OnCFindRequestAsync(DicomCFindRequest request)
     {
-        var query = ExtractWorklistQuery(request);
+        var query = WorklistDicomMapper.ToLgsGetWorkListRequest(request);
 
         Logger.LogInformation(
             "C-FIND MWL level={Level} modality={Modality} scheduledAE={ScheduledAE} date={Date}",
@@ -188,92 +195,11 @@ public sealed class RisGatewayDicomProvider :
         {
             yield return new DicomCFindResponse(request, DicomStatus.Pending)
             {
-                Dataset = BuildWorklistDataset(item),
+                Dataset = WorklistDicomMapper.ToWorklistDataset(item),
             };
         }
 
         yield return new DicomCFindResponse(request, DicomStatus.Success);
-    }
-
-    private static LgsGetWorkListRequest ExtractWorklistQuery(DicomCFindRequest request)
-    {
-        var sps = request.Dataset
-            .GetSequence(DicomTag.ScheduledProcedureStepSequence)?
-            .FirstOrDefault();
-
-        return new LgsGetWorkListRequest
-        {
-            PatientName             = NullIfEmpty(request.Dataset.GetSingleValueOrDefault(DicomTag.PatientName, string.Empty)),
-            PatientId               = NullIfEmpty(request.Dataset.GetSingleValueOrDefault(DicomTag.PatientID, string.Empty)),
-            AccessionNumber         = NullIfEmpty(request.Dataset.GetSingleValueOrDefault(DicomTag.AccessionNumber, string.Empty)),
-            StudyInstanceUid        = NullIfEmpty(request.Dataset.GetSingleValueOrDefault(DicomTag.StudyInstanceUID, string.Empty)),
-            RequestedProcedureId    = NullIfEmpty(request.Dataset.GetSingleValueOrDefault(DicomTag.RequestedProcedureID, string.Empty)),
-
-            ScheduledStationAeTitle         = sps?.GetSingleValueOrDefault(DicomTag.ScheduledStationAETitle, string.Empty) ?? string.Empty,
-            ScheduledProcedureStepStartDate = NullIfEmpty(sps?.GetSingleValueOrDefault(DicomTag.ScheduledProcedureStepStartDate, string.Empty)),
-            ScheduledProcedureStepStartTime = NullIfEmpty(sps?.GetSingleValueOrDefault(DicomTag.ScheduledProcedureStepStartTime, string.Empty)),
-            Modality                        = NullIfEmpty(sps?.GetSingleValueOrDefault(DicomTag.Modality, string.Empty)),
-            ScheduledProcedureStepId        = NullIfEmpty(sps?.GetSingleValueOrDefault(DicomTag.ScheduledProcedureStepID, string.Empty)),
-        };
-
-        static string? NullIfEmpty(string? s) => string.IsNullOrWhiteSpace(s) ? null : s;
-    }
-
-    private static DicomDataset BuildWorklistDataset(LgsGetWorkListResponse item)
-    {
-        // Top-level Patient + ISR + RequestedProcedure attributes
-        var ds = new DicomDataset
-        {
-            { DicomTag.SpecificCharacterSet, "ISO_IR 192" }, // UTF-8 hỗ trợ tiếng Việt
-            { DicomTag.PatientID, item.PatientId },
-            { DicomTag.PatientName, item.PatientName },
-            { DicomTag.AccessionNumber, item.AccessionNumber },
-            { DicomTag.StudyInstanceUID, item.StudyInstanceUid },
-            { DicomTag.RequestedProcedureID, item.RequestedProcedureId },
-        };
-
-        AddIfPresent(ds, DicomTag.PatientBirthDate, item.PatientBirthDate);
-        AddIfPresent(ds, DicomTag.PatientSex, item.PatientSex);
-        AddIfPresent(ds, DicomTag.MedicalAlerts, item.MedicalAlerts);
-        AddIfPresent(ds, DicomTag.Allergies, item.ContrastAllergies);
-        AddIfPresent(ds, DicomTag.AdmissionID, item.AdmissionId);
-        AddIfPresent(ds, DicomTag.ReferringPhysicianName, item.ReferringPhysicianName);
-        AddIfPresent(ds, DicomTag.RequestedProcedureDescription, item.RequestedProcedureDescription);
-        AddIfPresent(ds, DicomTag.RequestedProcedurePriority, item.RequestedProcedurePriority);
-        AddIfPresent(ds, DicomTag.RequestedProcedureComments, item.RequestedProcedureComments);
-
-        if (item.PatientWeight.HasValue)
-        {
-            ds.AddOrUpdate(DicomTag.PatientWeight, item.PatientWeight.Value);
-        }
-        if (item.PregnancyStatus.HasValue)
-        {
-            ds.AddOrUpdate(DicomTag.PregnancyStatus, (ushort)item.PregnancyStatus.Value);
-        }
-
-        // Scheduled Procedure Step Sequence (0040,0100)
-        var sps = new DicomDataset
-        {
-            { DicomTag.ScheduledStationAETitle, item.ScheduledStationAeTitle },
-            { DicomTag.ScheduledProcedureStepStartDate, item.ScheduledProcedureStepStartDate },
-            { DicomTag.ScheduledProcedureStepStartTime, item.ScheduledProcedureStepStartTime },
-            { DicomTag.Modality, item.Modality },
-            { DicomTag.ScheduledProcedureStepID, item.ScheduledProcedureStepId },
-        };
-        AddIfPresent(sps, DicomTag.ScheduledPerformingPhysicianName, item.ScheduledPerformingPhysicianName);
-        AddIfPresent(sps, DicomTag.ScheduledProcedureStepDescription, item.ScheduledProcedureStepDescription);
-
-        ds.Add(new DicomSequence(DicomTag.ScheduledProcedureStepSequence, sps));
-
-        return ds;
-    }
-
-    private static void AddIfPresent(DicomDataset ds, DicomTag tag, string? value)
-    {
-        if (!string.IsNullOrEmpty(value))
-        {
-            ds.AddOrUpdate(tag, value);
-        }
     }
 
     #endregion
@@ -300,7 +226,7 @@ public sealed class RisGatewayDicomProvider :
             return new DicomNCreateResponse(request, DicomStatus.InvalidAttributeValue);
         }
 
-        var payload = BuildMppsInProgressRequest(sopInstanceUid, request.Dataset);
+        var payload = MppsDicomMapper.ToMppsInProgressRequest(sopInstanceUid, request.Dataset);
         var result = await RisClient.NotifyMppsInProgressAsync(payload).ConfigureAwait(false);
 
         if (!result.IsSuccess)
@@ -339,7 +265,7 @@ public sealed class RisGatewayDicomProvider :
         bool ok;
         if (statusNorm == "COMPLETED")
         {
-            var payload = BuildMppsCompletedRequest(sopInstanceUid, request.Dataset);
+            var payload = MppsDicomMapper.ToMppsCompletedRequest(sopInstanceUid, request.Dataset);
             var result = await RisClient.NotifyMppsCompletedAsync(payload).ConfigureAwait(false);
             ok = result.IsSuccess;
             if (!ok) Logger.LogError("NotifyMppsCompleted failed: HTTP {Code} — {Message}",
@@ -347,7 +273,7 @@ public sealed class RisGatewayDicomProvider :
         }
         else if (statusNorm == "DISCONTINUED")
         {
-            var payload = BuildMppsDiscontinuedRequest(sopInstanceUid, request.Dataset);
+            var payload = MppsDicomMapper.ToMppsDiscontinuedRequest(sopInstanceUid, request.Dataset);
             var result = await RisClient.NotifyMppsDiscontinuedAsync(payload).ConfigureAwait(false);
             ok = result.IsSuccess;
             if (!ok) Logger.LogError("NotifyMppsDiscontinued failed: HTTP {Code} — {Message}",
@@ -361,99 +287,6 @@ public sealed class RisGatewayDicomProvider :
 
         return new DicomNSetResponse(request, ok ? DicomStatus.Success : DicomStatus.ProcessingFailure);
     }
-
-    // ============== MPPS DICOM → request model ==============
-
-    private static LgsMppsInProgressRequest BuildMppsInProgressRequest(string sopInstanceUid, DicomDataset ds)
-    {
-        // (0040,0270) ScheduledStepAttributesSequence — chứa linkage tới SPS
-        var sps = ds.GetSequence(DicomTag.ScheduledStepAttributesSequence)?.FirstOrDefault();
-
-        return new LgsMppsInProgressRequest
-        {
-            SopInstanceUid                    = sopInstanceUid,
-            PerformedProcedureStepId          = NullIfEmpty(ds.GetSingleValueOrDefault(DicomTag.PerformedProcedureStepID, string.Empty)),
-            ScheduledProcedureStepId          = NullIfEmpty(sps?.GetSingleValueOrDefault(DicomTag.ScheduledProcedureStepID, string.Empty)),
-            AccessionNumber                   = NullIfEmpty(sps?.GetSingleValueOrDefault(DicomTag.AccessionNumber, string.Empty)),
-            StudyInstanceUid                  = sps?.GetSingleValueOrDefault(DicomTag.StudyInstanceUID, string.Empty) ?? string.Empty,
-            StartDate                         = ds.GetSingleValueOrDefault(DicomTag.PerformedProcedureStepStartDate, string.Empty),
-            StartTime                         = ds.GetSingleValueOrDefault(DicomTag.PerformedProcedureStepStartTime, string.Empty),
-            Modality                          = NullIfEmpty(ds.GetSingleValueOrDefault(DicomTag.Modality, string.Empty)),
-            PerformedStationAeTitle           = NullIfEmpty(ds.GetSingleValueOrDefault(DicomTag.PerformedStationAETitle, string.Empty)),
-            PerformedStationName              = NullIfEmpty(ds.GetSingleValueOrDefault(DicomTag.PerformedStationName, string.Empty)),
-            PerformedProcedureStepDescription = NullIfEmpty(ds.GetSingleValueOrDefault(DicomTag.PerformedProcedureStepDescription, string.Empty)),
-            PerformedProcedureTypeDescription = NullIfEmpty(ds.GetSingleValueOrDefault(DicomTag.PerformedProcedureTypeDescription, string.Empty)),
-            PatientId                         = NullIfEmpty(ds.GetSingleValueOrDefault(DicomTag.PatientID, string.Empty)),
-            PatientName                       = NullIfEmpty(ds.GetSingleValueOrDefault(DicomTag.PatientName, string.Empty)),
-            PatientBirthDate                  = NullIfEmpty(ds.GetSingleValueOrDefault(DicomTag.PatientBirthDate, string.Empty)),
-            PatientSex                        = NullIfEmpty(ds.GetSingleValueOrDefault(DicomTag.PatientSex, string.Empty)),
-        };
-    }
-
-    private static LgsMppsCompletedRequest BuildMppsCompletedRequest(string sopInstanceUid, DicomDataset ds)
-    {
-        return new LgsMppsCompletedRequest
-        {
-            SopInstanceUid  = sopInstanceUid,
-            EndDate         = ds.GetSingleValueOrDefault(DicomTag.PerformedProcedureStepEndDate, string.Empty),
-            EndTime         = ds.GetSingleValueOrDefault(DicomTag.PerformedProcedureStepEndTime, string.Empty),
-            PerformedSeries = ExtractPerformedSeries(ds),
-        };
-    }
-
-    private static LgsMppsDiscontinuedRequest BuildMppsDiscontinuedRequest(string sopInstanceUid, DicomDataset ds)
-    {
-        // (0040,0280) Comments on the Performed Procedure Step — free-text reason.
-        // (0040,0281) PerformedProcedureStepDiscontinuationReasonCodeSequence — structured.
-        var reason = NullIfEmpty(ds.GetSingleValueOrDefault(DicomTag.CommentsOnThePerformedProcedureStep, string.Empty));
-
-        LgsMppsDiscontinuedRequestDiscontinuationReasonCode? reasonCode = null;
-        var reasonSeq = ds.GetSequence(DicomTag.PerformedProcedureStepDiscontinuationReasonCodeSequence)?.FirstOrDefault();
-        if (reasonSeq is not null)
-        {
-            reasonCode = new LgsMppsDiscontinuedRequestDiscontinuationReasonCode
-            {
-                CodeValue              = reasonSeq.GetSingleValueOrDefault(DicomTag.CodeValue, string.Empty),
-                CodingSchemeDesignator = reasonSeq.GetSingleValueOrDefault(DicomTag.CodingSchemeDesignator, string.Empty),
-                CodeMeaning            = reasonSeq.GetSingleValueOrDefault(DicomTag.CodeMeaning, string.Empty),
-            };
-        }
-
-        return new LgsMppsDiscontinuedRequest
-        {
-            SopInstanceUid  = sopInstanceUid,
-            EndDate         = ds.GetSingleValueOrDefault(DicomTag.PerformedProcedureStepEndDate, string.Empty),
-            EndTime         = ds.GetSingleValueOrDefault(DicomTag.PerformedProcedureStepEndTime, string.Empty),
-            Reason          = reason,
-            ReasonCode      = reasonCode,
-            PerformedSeries = ExtractPerformedSeries(ds),
-        };
-    }
-
-    private static List<LgsMppsPerformedSeriesItem> ExtractPerformedSeries(DicomDataset ds)
-    {
-        var series = new List<LgsMppsPerformedSeriesItem>();
-        var seq = ds.GetSequence(DicomTag.PerformedSeriesSequence);
-        if (seq is null) return series;
-
-        foreach (var item in seq)
-        {
-            series.Add(new LgsMppsPerformedSeriesItem
-            {
-                RetrieveAeTitle                 = NullIfEmpty(item.GetSingleValueOrDefault(DicomTag.RetrieveAETitle, string.Empty)),
-                SeriesDescription               = NullIfEmpty(item.GetSingleValueOrDefault(DicomTag.SeriesDescription, string.Empty)),
-                SeriesInstanceUid               = item.GetSingleValueOrDefault(DicomTag.SeriesInstanceUID, string.Empty),
-                PerformedProcedureStepStartDate = NullIfEmpty(item.GetSingleValueOrDefault(DicomTag.PerformedProcedureStepStartDate, string.Empty)),
-                Modality                        = NullIfEmpty(item.GetSingleValueOrDefault(DicomTag.Modality, string.Empty)),
-                ProtocolName                    = NullIfEmpty(item.GetSingleValueOrDefault(DicomTag.ProtocolName, string.Empty)),
-            });
-        }
-        return series;
-
-        static string? NullIfEmpty(string? s) => string.IsNullOrWhiteSpace(s) ? null : s;
-    }
-
-    private static string? NullIfEmpty(string? s) => string.IsNullOrWhiteSpace(s) ? null : s;
 
     public Task<DicomNGetResponse> OnNGetRequestAsync(DicomNGetRequest request)
         => Task.FromResult(new DicomNGetResponse(request, DicomStatus.SOPClassNotSupported));
@@ -496,6 +329,15 @@ public sealed class RisGatewayDicomProvider :
         {
             var path = await Spool.EnqueueAsync(request.File).ConfigureAwait(false);
             Logger.LogInformation("C-STORE spooled sop={Sop} → {Path}", sop, path);
+
+            // Thống kê "đã nhận" (best-effort, chỉ đẩy vào queue in-memory — không chạm DB ở đây).
+            if (request.Dataset is not null)
+            {
+                Stats?.TryRecord(StudyStatsEvent.FromDataset(
+                    StudyStatsEventKind.Received, request.Dataset,
+                    callingAe: Association?.CallingAE ?? string.Empty));
+            }
+
             return new DicomCStoreResponse(request, DicomStatus.Success);
         }
         catch (Exception ex)

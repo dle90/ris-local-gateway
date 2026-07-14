@@ -56,6 +56,15 @@ public sealed class StubRisClient : IRisClient
         return Task.FromResult(RisResponse.Success());
     }
 
+    public Task<RisResponse> NotifyReceiveStudyInfoAsync(
+        LgsReceiveStudyInfoRequest request,
+        CancellationToken ct = default)
+    {
+        _logger.LogInformation("[stub] NotifyReceiveStudyInfoAsync study={Study} series={Series} bodyPart={BodyPart} patient={Patient}",
+            request.StudyInstanceUid, request.SeriesInstanceUid, request.BodyPart, request.PatientName);
+        return Task.FromResult(RisResponse.Success());
+    }
+
     public Task<string?> GetAccessTokenAsync(CancellationToken ct = default)
     {
         // Stub: không có token thật → STOW sẽ gửi không kèm Bearer (chỉ chạy nếu proxy auth off).

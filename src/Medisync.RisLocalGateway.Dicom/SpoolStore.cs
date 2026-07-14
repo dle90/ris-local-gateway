@@ -44,18 +44,12 @@ public sealed class SpoolStore
         ApplyStorage(configStore.Load().Dicom.StorageDirectory);
     }
 
-    private static string ResolveSpoolRoot(string? storageDirectory) =>
-        string.IsNullOrWhiteSpace(storageDirectory)
-            ? Path.Combine(ConfigPaths.BaseDirectory, "spool")
-            : Path.Combine(storageDirectory, "spool");
-
     [MemberNotNull(nameof(_spoolDir), nameof(_failedDir), nameof(_failedReasonDir))]
     private void ApplyStorage(string? storageDirectory)
     {
-        var root = ResolveSpoolRoot(storageDirectory);
-        _spoolDir = root;
-        _failedDir = Path.Combine(root, "failed");
-        _failedReasonDir = Path.Combine(root, "failed-reasons");
+        _spoolDir = SpoolPaths.ResolveRoot(storageDirectory);
+        _failedDir = SpoolPaths.FailedDir(storageDirectory);
+        _failedReasonDir = SpoolPaths.FailedReasonsDir(storageDirectory);
         Directory.CreateDirectory(_spoolDir);
         Directory.CreateDirectory(_failedDir);
         Directory.CreateDirectory(_failedReasonDir);
@@ -70,7 +64,7 @@ public sealed class SpoolStore
     /// </summary>
     public void Reconfigure(string? storageDirectory)
     {
-        var newRoot = ResolveSpoolRoot(storageDirectory);
+        var newRoot = SpoolPaths.ResolveRoot(storageDirectory);
         if (string.Equals(newRoot, _spoolDir, StringComparison.OrdinalIgnoreCase)) return;
 
         var old = _spoolDir;
@@ -180,14 +174,14 @@ public sealed class SpoolStore
         {
             var baseName = Path.GetFileNameWithoutExtension(failedFileName);
             var sidecar = Path.Combine(_failedReasonDir, baseName + ".error.json");
-            var info = new
+            var info = new SpoolFailureSidecar
             {
-                file = failedFileName,
-                category,
-                attempts,
-                series,
-                reason = reason ?? string.Empty,
-                failedAtUtc = DateTimeOffset.UtcNow.ToString("o"),
+                File = failedFileName,
+                Category = category,
+                Attempts = attempts,
+                Series = series,
+                Reason = reason ?? string.Empty,
+                FailedAtUtc = DateTimeOffset.UtcNow.ToString("o"),
             };
             File.WriteAllText(sidecar, JsonSerializer.Serialize(info, FailureJsonOptions));
         }

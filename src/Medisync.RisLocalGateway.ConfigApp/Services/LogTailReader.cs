@@ -6,18 +6,28 @@ using System.Linq;
 namespace Medisync.RisLocalGateway.ConfigApp.Services;
 
 /// <summary>
-/// Tail Serilog rolling log file. Theo dõi file mới nhất trong log directory,
-/// đọc các dòng append từ lần đọc trước.
+/// Tail Serilog rolling log file. Theo dõi file mới nhất khớp <see cref="SetPattern"/>
+/// trong log directory, đọc các dòng append từ lần đọc trước.
 /// </summary>
 public sealed class LogTailReader
 {
     private readonly string _logDirectory;
+    private string _pattern;
     private string? _currentFile;
     private long _lastPosition;
 
-    public LogTailReader(string logDirectory)
+    public LogTailReader(string logDirectory, string pattern = "gateway-*.log")
     {
         _logDirectory = logDirectory;
+        _pattern = pattern;
+    }
+
+    /// <summary>Đổi nguồn log (vd "gateway-*.log" ↔ "configapp-*.log") — tự Reset để đọc lại từ đầu.</summary>
+    public void SetPattern(string pattern)
+    {
+        if (string.Equals(pattern, _pattern, StringComparison.OrdinalIgnoreCase)) return;
+        _pattern = pattern;
+        Reset();
     }
 
     /// <summary>
@@ -27,7 +37,7 @@ public sealed class LogTailReader
     {
         if (!Directory.Exists(_logDirectory)) return Array.Empty<string>();
 
-        var latest = Directory.GetFiles(_logDirectory, "gateway-*.log")
+        var latest = Directory.GetFiles(_logDirectory, _pattern)
             .OrderByDescending(File.GetLastWriteTimeUtc)
             .FirstOrDefault();
 

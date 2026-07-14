@@ -1,12 +1,17 @@
 using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using FellowOakDicom;
 using Medisync.RisLocalGateway.Core.Configuration;
+using Medisync.RisLocalGateway.Core.Ris;
+using Medisync.RisLocalGateway.Core.Ris.Models;
 using Medisync.RisLocalGateway.Dicom;
+using Medisync.RisLocalGateway.Dicom.Mappers;
+using Medisync.RisLocalGateway.Dicom.Stats;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 
@@ -27,6 +32,8 @@ public sealed class SpoolForwarder : BackgroundService
     private readonly IPacsStowClient _pacs;
     private readonly SpoolStore _spool;
     private readonly ConfigStore _configStore;
+    private readonly IRisClient _ris;
+    private readonly StudyStatsStore _stats;
     private readonly ILogger<SpoolForwarder> _logger;
 
     private readonly ConcurrentDictionary<string, int> _attempts = new(); // path -> số lần fail (retry)
@@ -36,11 +43,15 @@ public sealed class SpoolForwarder : BackgroundService
         IPacsStowClient pacs,
         SpoolStore spool,
         ConfigStore configStore,
+        IRisClient ris,
+        StudyStatsStore stats,
         ILogger<SpoolForwarder> logger)
     {
         _pacs = pacs;
         _spool = spool;
         _configStore = configStore;
+        _ris = ris;
+        _stats = stats;
         _logger = logger;
     }
 
@@ -53,7 +64,9 @@ public sealed class SpoolForwarder : BackgroundService
             var pacs = _configStore.Load().Pacs;
             var interval = TimeSpan.FromSeconds(pacs.ScanIntervalSeconds > 0 ? pacs.ScanIntervalSeconds : 15);
             var maxParallel = pacs.MaxParallelForwards > 0 ? pacs.MaxParallelForwards : 4;
-            var maxRetries = pacs.MaxRetries > 0 ? pacs.MaxRetries : 10;
+            // Fallback phải CAO (khớp default PacsConfig.MaxRetries=1000): cap thấp sẽ dead-letter
+            // oan ảnh khi PACS down hơi lâu — triết lý là ưu tiên GIỮ ẢNH.
+            var maxRetries = pacs.MaxRetries > 0 ? pacs.MaxRetries : 1000;
 
             try
             {
@@ -102,10 +115,21 @@ public sealed class SpoolForwarder : BackgroundService
         // 1) PRIME nếu series chưa prime: gửi 1 instance qua lane tuần tự + chờ thành công.
         if (!_spool.IsPrimed(series))
         {
+            // Đọc snapshot study TRƯỚC khi forward — forward thành công sẽ XOÁ file khỏi spool.
+            var studyInfoRequest = await TryReadStudyInfoAsync(paths[0]).ConfigureAwait(false);
+
             var primed = await PrimeAsync(series, paths[0], maxRetries, ct).ConfigureAwait(false);
             // Prime fail (PACS down) → chờ scan sau. Nếu prime instance bị dead-letter → scan sau
             // file đó biến mất, paths[0] là instance khác → tự thử làm prime tiếp.
             if (!primed) return;
+
+            // Sau prime OK: báo snapshot study (+ body part) lên RIS — PER SERIES. NGOÀI prime-lane
+            // (không chặn prime series khác) + best-effort (RIS lỗi chỉ log warn, không ảnh hưởng forward).
+            if (studyInfoRequest is not null)
+            {
+                await NotifyReceiveStudyInfoBestEffortAsync(studyInfoRequest, ct).ConfigureAwait(false);
+            }
+
             paths = paths.Skip(1).ToList();
         }
 
@@ -153,6 +177,13 @@ public sealed class SpoolForwarder : BackgroundService
             _logger.LogError(ex, "Mở spool file lỗi (hỏng?) → dead-letter: {Path}", path);
             _spool.MoveToFailed(path, "Corrupt", 0, "Mở DICOM lỗi: " + ex.Message);
             _attempts.TryRemove(path, out _);
+            // Không đọc được dataset → lấy SOP từ tên file spool (= SOP UID đã sanitize lúc enqueue).
+            _stats.TryRecord(new StudyStatsEvent
+            {
+                Kind = StudyStatsEventKind.Failed,
+                SopUid = Path.GetFileNameWithoutExtension(path),
+                FailedReason = "Mở DICOM lỗi: " + ex.Message,
+            });
             return false;
         }
 
@@ -169,6 +200,7 @@ public sealed class SpoolForwarder : BackgroundService
         {
             _spool.Delete(path);
             _attempts.TryRemove(path, out _);
+            _stats.TryRecord(StudyStatsEvent.FromDataset(StudyStatsEventKind.Pushed, file.Dataset));
             return true;
         }
 
@@ -179,6 +211,8 @@ public sealed class SpoolForwarder : BackgroundService
             _logger.LogError("Forward lỗi vĩnh viễn (ảnh bị từ chối) → dead-letter ngay: {Path} — {Detail}", path, result.Detail);
             _spool.MoveToFailed(path, "Permanent", prior, result.Detail);
             _attempts.TryRemove(path, out _);
+            _stats.TryRecord(StudyStatsEvent.FromDataset(
+                StudyStatsEventKind.Failed, file.Dataset, failedReason: result.Detail));
             return false;
         }
 
@@ -190,12 +224,60 @@ public sealed class SpoolForwarder : BackgroundService
             _logger.LogError("Forward lỗi hạ tầng {N} lần (vượt cap an toàn {Max}) → dead-letter: {Path} — {Detail}", n, maxRetries, path, result.Detail);
             _spool.MoveToFailed(path, "Retryable", n, result.Detail);
             _attempts.TryRemove(path, out _);
+            _stats.TryRecord(StudyStatsEvent.FromDataset(
+                StudyStatsEventKind.Failed, file.Dataset, failedReason: result.Detail));
         }
         else
         {
             _logger.LogWarning("Forward lỗi hạ tầng lần {N}/{Max}, sẽ thử lại vòng sau (PACS/RIS tạm lỗi?): {Path} — {Detail}", n, maxRetries, path, result.Detail);
         }
         return false;
+    }
+
+    /// <summary>
+    /// Đọc snapshot study (Study/Series UID + patient + body part...) từ file prime để báo lên RIS.
+    /// Trả null nếu file không mở được (ForwardOne sẽ tự dead-letter) hoặc thiếu StudyInstanceUID.
+    /// </summary>
+    private async Task<LgsReceiveStudyInfoRequest?> TryReadStudyInfoAsync(string path)
+    {
+        try
+        {
+            var file = await DicomFile.OpenAsync(path).ConfigureAwait(false);
+            return ImageDicomMapper.ToReceiveStudyInfoRequest(file.Dataset);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "Đọc study info từ file prime lỗi (bỏ qua): {Path}", path);
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Gọi RIS receive-study-info (per series) — BEST-EFFORT: lỗi chỉ log warn, không retry, không
+    /// ảnh hưởng pipeline forward ảnh (HIS idempotent nên lần re-prime sau có thể bù).
+    /// </summary>
+    private async Task NotifyReceiveStudyInfoBestEffortAsync(LgsReceiveStudyInfoRequest request, CancellationToken ct)
+    {
+        try
+        {
+            var result = await _ris.NotifyReceiveStudyInfoAsync(request, ct).ConfigureAwait(false);
+            if (result.IsSuccess)
+            {
+                _logger.LogInformation("Study info → RIS OK (study={Study} series={Series} bodyPart={BodyPart})",
+                    request.StudyInstanceUid, request.SeriesInstanceUid, request.BodyPart);
+            }
+            else
+            {
+                _logger.LogWarning("Study info → RIS FAIL HTTP {Code} — {Message} (study={Study} series={Series}) — bỏ qua, không retry",
+                    result.HttpStatusCode, result.ErrorMessage, request.StudyInstanceUid, request.SeriesInstanceUid);
+            }
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Study info → RIS exception (study={Study} series={Series}) — bỏ qua, không retry",
+                request.StudyInstanceUid, request.SeriesInstanceUid);
+        }
     }
 
     /// <summary>Đọc SeriesInstanceUID của file leftover (sau restart) để gom nhóm.</summary>
